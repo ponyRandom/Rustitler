@@ -1,0 +1,127 @@
+name: Windows CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-spike:
+    name: DS-12 Tesseract Chinese data
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: windows-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-cargo-registry-
+
+      - name: Cache tesseract-rs build output
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Roaming\tesseract-rs
+          key: windows-tesseract-rs-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-tesseract-rs-
+
+      - name: Install simplified Chinese traineddata
+        shell: pwsh
+        run: |
+          $tessdata = Join-Path $env:APPDATA 'tesseract-rs\tessdata'
+          New-Item -ItemType Directory -Force $tessdata | Out-Null
+          Invoke-WebRequest `
+            -Uri 'https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata' `
+            -OutFile (Join-Path $tessdata 'chi_sim.traineddata')
+          Get-ChildItem $tessdata
+
+      - name: Run DS-12 spike
+        shell: pwsh
+        working-directory: src-tauri
+        run: cargo test --features spikes -- spikes::ds11_tesseract::tesseract_chi_sim_loads -- --nocapture
+
+  windows-package:
+    name: Windows Tauri package
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: windows-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-cargo-registry-
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Run backend tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Run Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build Windows bundle
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --verbose
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: rustitler-[platform]-[arch]-[bundle]
+
+      - name: Upload Windows bundles
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rustitler-windows-bundles
+          path: src-tauri/target/release/bundle
+          if-no-files-found: warn
