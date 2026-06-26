@@ -200,9 +200,11 @@ mod tests {
     #[test]
     fn save_settings_validates_and_persists() {
         let dir = tempfile::tempdir().unwrap();
-        let mut settings = Settings::default();
-        settings.auto_output_threshold = 65;
-        settings.layout_sensitivity = 1.5;
+        let settings = Settings {
+            auto_output_threshold: 65,
+            layout_sensitivity: 1.5,
+            ..Settings::default()
+        };
 
         let saved = save_settings(dir.path(), &settings).unwrap();
         let loaded = load_settings(dir.path()).unwrap();
@@ -215,8 +217,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_invalid_threshold() {
-        let mut settings = Settings::default();
-        settings.auto_output_threshold = 101;
+        let settings = Settings {
+            auto_output_threshold: 101,
+            ..Settings::default()
+        };
 
         let error = validate_settings(&settings).unwrap_err();
 
@@ -226,8 +230,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_invalid_sensitivity() {
-        let mut settings = Settings::default();
-        settings.ocr_conservatism = 2.1;
+        let settings = Settings {
+            ocr_conservatism: 2.1,
+            ..Settings::default()
+        };
 
         let error = validate_settings(&settings).unwrap_err();
 
@@ -236,19 +242,23 @@ mod tests {
 
     #[test]
     fn validate_rejects_empty_or_too_many_keyword_rules() {
-        let mut empty_keyword = Settings::default();
-        empty_keyword.keyword_rules = vec![KeywordRule {
-            keyword: "   ".into(),
-            score_delta: 5,
-        }];
+        let empty_keyword = Settings {
+            keyword_rules: vec![KeywordRule {
+                keyword: "   ".into(),
+                score_delta: 5,
+            }],
+            ..Settings::default()
+        };
 
-        let mut too_many = Settings::default();
-        too_many.keyword_rules = (0..=MAX_RULES)
-            .map(|i| KeywordRule {
-                keyword: format!("关键词{i}"),
-                score_delta: 1,
-            })
-            .collect();
+        let too_many = Settings {
+            keyword_rules: (0..=MAX_RULES)
+                .map(|i| KeywordRule {
+                    keyword: format!("关键词{i}"),
+                    score_delta: 1,
+                })
+                .collect(),
+            ..Settings::default()
+        };
 
         assert!(validate_settings(&empty_keyword).is_err());
         assert!(validate_settings(&too_many).is_err());
@@ -256,14 +266,18 @@ mod tests {
 
     #[test]
     fn validate_rejects_invalid_regex_and_version() {
-        let mut invalid_regex = Settings::default();
-        invalid_regex.regex_rules = vec![RegexRule {
-            pattern: "(".into(),
-            score_delta: 5,
-        }];
+        let invalid_regex = Settings {
+            regex_rules: vec![RegexRule {
+                pattern: "(".into(),
+                score_delta: 5,
+            }],
+            ..Settings::default()
+        };
 
-        let mut invalid_version = Settings::default();
-        invalid_version.version = SETTINGS_VERSION + 1;
+        let invalid_version = Settings {
+            version: SETTINGS_VERSION + 1,
+            ..Settings::default()
+        };
 
         assert!(validate_settings(&invalid_regex)
             .unwrap_err()
@@ -279,11 +293,13 @@ mod tests {
     fn import_settings_reuses_validation_chain() {
         let dir = tempfile::tempdir().unwrap();
         let import_path = dir.path().join("import.json");
-        let mut settings = Settings::default();
-        settings.regex_rules = vec![RegexRule {
-            pattern: "^合同".into(),
-            score_delta: 8,
-        }];
+        let settings = Settings {
+            regex_rules: vec![RegexRule {
+                pattern: "^合同".into(),
+                score_delta: 8,
+            }],
+            ..Settings::default()
+        };
         std::fs::write(
             &import_path,
             serde_json::to_string_pretty(&settings).unwrap(),
@@ -310,8 +326,10 @@ mod tests {
     #[test]
     fn reset_settings_persists_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let mut settings = Settings::default();
-        settings.auto_output_threshold = 33;
+        let settings = Settings {
+            auto_output_threshold: 33,
+            ..Settings::default()
+        };
         save_settings(dir.path(), &settings).unwrap();
 
         let reset = reset_settings(dir.path()).unwrap();
@@ -323,8 +341,10 @@ mod tests {
 
     #[test]
     fn create_settings_snapshot_clones_current_settings() {
-        let mut settings = Settings::default();
-        settings.auto_output_threshold = 80;
+        let mut settings = Settings {
+            auto_output_threshold: 80,
+            ..Settings::default()
+        };
 
         let snapshot = create_settings_snapshot(&settings);
         settings.auto_output_threshold = 20;

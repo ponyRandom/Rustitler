@@ -371,7 +371,7 @@ pub fn list_history(
     let rows = stmt
         .query_map(
             params![usize_to_i64(limit)?, usize_to_i64(offset)?],
-            |row| batch_row_from_row(row),
+            batch_row_from_row,
         )
         .map_err(|err| history_error(format!("查询批次列表失败：{err}")))?;
 

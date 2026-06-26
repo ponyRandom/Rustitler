@@ -432,8 +432,10 @@ mod tests {
 
     #[test]
     fn scores_image_ocr_title_but_applies_ocr_conservatism() {
-        let mut profile = ScoringProfile::default();
-        profile.ocr_conservatism = 1.5;
+        let profile = ScoringProfile {
+            ocr_conservatism: 1.5,
+            ..ScoringProfile::default()
+        };
 
         let result = score_document(
             ExtractedDocument {
@@ -575,8 +577,10 @@ mod tests {
 
     #[test]
     fn low_confidence_candidate_stays_pending() {
-        let mut profile = ScoringProfile::default();
-        profile.auto_output_threshold = 95;
+        let profile = ScoringProfile {
+            auto_output_threshold: 95,
+            ..ScoringProfile::default()
+        };
 
         let result = score_document(
             pdf_document(vec![block(

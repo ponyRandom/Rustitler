@@ -9,8 +9,8 @@
 - [x] `scoring`：实现候选标题生成、分类评分和置信度决策（依赖：`core-models`, `settings`）
 - [x] `rename`：实现输出目录、副本复制、文件名清洗和冲突处理（依赖：`core-models`）
 - [x] `history`：实现 SQLite 历史、候选明细、撤销记录和重复检测（依赖：`core-models`, `settings`）
-- [ ] `ingest`：实现输入扫描、格式识别、队列初始化和文件指纹（依赖：`core-models`, `history` 的重复检测接口）
-- [ ] `extract`：实现 PDF、Word、DOC、图片和扫描 PDF 的离线提取（依赖：`core-models`, `dependency-spikes`, `diagnostics`）
+- [x] `ingest`：实现输入扫描、格式识别、队列初始化和文件指纹（依赖：`core-models`, `history` 的重复检测接口）
+- [x] `extract`：实现 PDF、Word、DOC、图片和扫描 PDF 的离线提取（依赖：`core-models`, `dependency-spikes`, `diagnostics`）
 - [ ] `batch-scheduler`：实现批次调度、并发限流、取消、事件流和状态快照（依赖：`ingest`, `extract`, `scoring`, `rename`, `history`, `diagnostics`）
 - [ ] `commands`：实现 Tauri IPC 命令桥接、参数校验和事件发布（依赖：`batch-scheduler`, `settings`, `history`, `rename`）
 - [ ] `ui`：实现主界面、待处理编辑、历史页、设置页和前端状态镜像（依赖：`commands` 的 DTO 和事件协议）
@@ -19,7 +19,7 @@
 
 ## 当前状态
 
-- 当前模块：`ingest`。
+- 当前模块：`batch-scheduler`。
 - `dependency-spikes` 已完成；DS-01 至 DS-18 均有验证结论。
 - `core-models` 已完成；Rust/TypeScript IPC DTO、错误模型、批次事件、历史 DTO、设置结构和序列化快照测试已落地。
 - `settings` 已完成；`settings.json` 路径解析、默认创建、原子写入、完整校验、导入导出、恢复默认和设置快照已落地。
@@ -27,6 +27,8 @@
 - `scoring` 已完成；纯函数评分入口、PDF/图片/Word 候选生成、文本质量/版式/位置/关键词/正则规则、保守降权、阈值决策和规则明细测试已落地。
 - `rename` 已完成；源目录旁 `Rustitler 输出` 路径、输出目录创建、文件名清洗、保留扩展名、冲突序号、临时复制后不覆盖落位、手动待处理复用流程和错误转换测试已落地。
 - `history` 已完成；`history.sqlite` 路径、SQLite schema 和版本记录、设置快照、批次与文件结果、候选和规则明细、分页列表、批次详情、重复检测、撤销记录和安全撤销测试已落地。
+- `ingest` 已完成；直接文件接收、文件夹第一层扫描、子文件夹不递归跳过、支持格式识别、不支持格式跳过、来源路径记录、规范化路径、大小/修改时间指纹、`FileJob` 初始化、UUID 分配和重复检测标记测试已落地。
+- `extract` 已完成；统一提取服务接口、按 `FileType` 分派、DOCX 前 10 个非空段落、DOC 转换抽象和错误映射、PDF 原生文本块坐标归一化、PDF OCR 兜底编排、图片 OCR 编排、批次临时目录清理和 Debug 提取诊断保存测试已落地。`extraction-deps` feature 下已提供 `undoc`、LibreOffice 和 `liteparse` 适配；OCR 引擎通过 `OcrExtractor` 接口接入，Tesseract 图片解码和离线 tessdata 资产留给 `packaging-offline` 收敛。
 - DS-09/DS-10 已在当前 macOS 环境通过 LibreOffice `soffice` 验证。
 - DS-12 已在 GitHub Actions Windows runner 验证通过：run `28216523178` 的 `DS-12 Tesseract Chinese data` job 成功执行 `cargo test --release --features spikes -- spikes::ds11_tesseract::tesseract_chi_sim_loads -- --nocapture`；同一 run 的 `Windows Tauri package` job 也成功完成 Windows bundle 构建和 artifact 上传。
-- 下一个可启动模块：`ingest`。
+- 下一个可启动模块：`batch-scheduler`。
