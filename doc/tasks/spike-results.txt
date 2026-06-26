@@ -1,0 +1,43 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running unittests src/lib.rs (target/debug/deps/rustitler_lib-417dbd86a1a216a6)
+
+running 15 tests
+DS-07 PASS: error = ZipArchive("invalid Zip archive: Could not find EOCD")
+test spikes::ds05_undoc::undoc_corrupt_file_error ... ok
+DS-03 PASS: error type = Pdf(InvalidFormat)
+test spikes::ds01_liteparse::liteparse_empty_pdf_error ... ok
+test spikes::ds14_pdfium::pdfium_temp_file_isolation ... ok
+test spikes::ds16_sqlite::sqlite_app_data_dir_writable ... ok
+test spikes::ds16_sqlite::sqlite_create_insert_query ... ok
+DS-05/06 PASS: 71 chars, 3 blocks
+DS-05 PASS: extracted 71 chars
+DS-13 PASS: OCR returned "9", bbox=(7, 4, 17, 19), confidence 23 / 23.214973
+test spikes::ds05_undoc::undoc_chinese_paragraphs ... ok
+test spikes::ds05_undoc::undoc_extracts_generated_chinese_docx_text ... ok
+test spikes::ds11_tesseract::tesseract_text_and_confidence ... ok
+DS-11 PASS: chi_sim language data loaded from /Users/shenxiaoliang/Library/Application Support/tesseract-rs/tessdata
+test spikes::ds11_tesseract::tesseract_chi_sim_loads ... ok
+DS-01 PASS: extracted 89 chars from generated Chinese PDF
+test spikes::ds01_liteparse::liteparse_reads_generated_chinese_pdf_text ... ok
+DS-14 PASS: 1275x1650 PNG, 54476 bytes
+test spikes::ds14_pdfium::liteparse_first_page_screenshot_rasterizes_pdf ... ok
+DS-02/04 PASS: 612x792 pts, 3 text items
+test spikes::ds01_liteparse::liteparse_page_size_and_blocks ... ok
+test spikes::ds17_hash_perf::hash_10mb_in_reasonable_time ... ok
+test spikes::ds09_doc_conversion::libreoffice_invalid_doc_returns_stable_spike_error ... ok
+test spikes::ds09_doc_conversion::libreoffice_converts_legacy_doc_to_undoc_readable_docx ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 1.56s
+
+     Running unittests src/main.rs (target/debug/deps/rustitler-9510c157122071d0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests rustitler_lib
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
