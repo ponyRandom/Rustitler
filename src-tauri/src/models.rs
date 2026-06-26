@@ -334,7 +334,7 @@ impl From<&Settings> for ScoringProfile {
 
 // ── IPC view types ─────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PendingReason {
     LowConfidence,
