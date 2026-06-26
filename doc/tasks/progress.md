@@ -2,7 +2,7 @@
 
 ## 总控模块清单
 
-- [ ] `dependency-spikes`：验证关键离线依赖可用性（依赖：无）
+- [x] `dependency-spikes`：验证关键离线依赖可用性（依赖：无）
 - [ ] `core-models`：定义跨模块数据结构、错误模型和 IPC DTO 基础（依赖：`dependency-spikes` 的接口结论）
 - [ ] `settings`：实现设置持久化、校验、导入导出和快照（依赖：`core-models`）
 - [ ] `diagnostics`：实现结构化运行日志、Debug 诊断输出和清理入口（依赖：`core-models`, `settings`）
@@ -17,10 +17,10 @@
 - [ ] `packaging-offline`：实现 Tauri 权限收敛、离线依赖内置、跨平台打包和离线验收（依赖：`dependency-spikes`, `extract`, `commands`）
 - [ ] 50 份样本文档验收：验证自动命名准确率、待处理行为、撤销、设置和离线运行（依赖：全部模块）
 
-## 当前阻塞
+## 当前状态
 
-- 当前模块：`dependency-spikes`。
-- 阻塞任务：DS-12；因此 DS-18 和父模块暂不能勾选完成。
+- 当前模块：`core-models`。
+- `dependency-spikes` 已完成；DS-01 至 DS-18 均有验证结论。
 - DS-09/DS-10 已在当前 macOS 环境通过 LibreOffice `soffice` 验证。
-- DS-12 需要 Windows 环境验证 Tesseract 简体中文语言包本地加载；当前 macOS 环境无法真实验证。OrbStack 已启动且 Docker 可用，但 Docker server 是 `OSType=linux Architecture=aarch64`，`orb create` 仅支持 Linux machines，不能提供 Windows 本地运行环境。
-- 已补充 DS-12 的真实 Windows runner 设置和验证命令，并新增 `.github/workflows/windows-ci.yml`。本次 Windows CI 日志显示 DS-12 debug profile 会命中 `tesseract-rs 0.2.0` 的 Windows debug 库名不匹配，已改为 release profile；随后日志显示 Windows PowerShell runner 没有 `HOME`，已将测试路径解析改为优先使用 `%APPDATA%`；等待修复后的 GitHub Actions Windows runner 执行 `windows-spike` 通过后才能勾选 DS-12。
+- DS-12 已在 GitHub Actions Windows runner 验证通过：run `28216523178` 的 `DS-12 Tesseract Chinese data` job 成功执行 `cargo test --release --features spikes -- spikes::ds11_tesseract::tesseract_chi_sim_loads -- --nocapture`；同一 run 的 `Windows Tauri package` job 也成功完成 Windows bundle 构建和 artifact 上传。
+- 下一个可启动模块：`core-models`。
