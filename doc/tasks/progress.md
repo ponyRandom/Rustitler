@@ -23,4 +23,4 @@
 - 阻塞任务：DS-12；因此 DS-18 和父模块暂不能勾选完成。
 - DS-09/DS-10 已在当前 macOS 环境通过 LibreOffice `soffice` 验证。
 - DS-12 需要 Windows 环境验证 Tesseract 简体中文语言包本地加载；当前 macOS 环境无法真实验证。OrbStack 已启动且 Docker 可用，但 Docker server 是 `OSType=linux Architecture=aarch64`，`orb create` 仅支持 Linux machines，不能提供 Windows 本地运行环境。
-- 已补充 DS-12 的真实 Windows runner 设置和验证命令，并新增 `.github/workflows/windows-ci.yml`。本次 Windows CI 日志显示 DS-12 debug profile 会命中 `tesseract-rs 0.2.0` 的 Windows debug 库名不匹配，已改为 release profile；等待修复后的 GitHub Actions Windows runner 执行 `windows-spike` 通过后才能勾选 DS-12。
+- 已补充 DS-12 的真实 Windows runner 设置和验证命令，并新增 `.github/workflows/windows-ci.yml`。本次 Windows CI 日志显示 DS-12 debug profile 会命中 `tesseract-rs 0.2.0` 的 Windows debug 库名不匹配，已改为 release profile；随后日志显示 Windows PowerShell runner 没有 `HOME`，已将测试路径解析改为优先使用 `%APPDATA%`；等待修复后的 GitHub Actions Windows runner 执行 `windows-spike` 通过后才能勾选 DS-12。

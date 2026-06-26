@@ -42,7 +42,7 @@
   cargo test --release --features spikes -- spikes::ds11_tesseract::tesseract_chi_sim_loads -- --nocapture
   ```
 
-  通过判定：命令退出码为 0，输出 `DS-11 PASS: chi_sim language data loaded from ...\tesseract-rs\tessdata`。注意 `tesseract-rs` 默认 `build-tesseract` 会在构建期下载/编译 Tesseract 和 Leptonica；`tesseract-rs 0.2.0` 在 Windows debug profile 下会生成 `leptonica-1.84.1d.lib` / `tesseract53d.lib`，但链接脚本查找非 debug 库名，因此 DS-12 Windows 验证使用 release profile。后续 `packaging-offline` 仍需把 Windows OCR 资产改为可离线内置或预缓存。
+  通过判定：命令退出码为 0，输出 `DS-11 PASS: chi_sim language data loaded from ...\tesseract-rs\tessdata`。注意 `tesseract-rs` 默认 `build-tesseract` 会在构建期下载/编译 Tesseract 和 Leptonica；`tesseract-rs 0.2.0` 在 Windows debug profile 下会生成 `leptonica-1.84.1d.lib` / `tesseract53d.lib`，但链接脚本查找非 debug 库名，因此 DS-12 Windows 验证使用 release profile。Windows runner 的 PowerShell 环境可能没有 `HOME`，测试路径解析已改为 Windows 下优先使用 `%APPDATA%\tesseract-rs\tessdata`。后续 `packaging-offline` 仍需把 Windows OCR 资产改为可离线内置或预缓存。
 - DS-12 CI 路径：已新增 `.github/workflows/windows-ci.yml`，包含 `windows-spike` 和 `windows-package` 两个 Windows runner job。`windows-spike` 执行上述 DS-12 语言包加载验证；`windows-package` 执行前端依赖安装、前端生产构建、Rust 格式/测试/Clippy 和 Tauri Windows bundle 构建并上传 artifacts。等待 GitHub Actions 跑绿后才能将 DS-12 勾选完成。
 - DS-13：`tesseract-rs` 可返回 OCR 文本、词级 bbox 和 confidence；后续 `extract` 应优先使用 `get_iterator()` / `get_current_word()` 或同级 iterator API 生成 OCR `LayoutBlock`。
 - DS-14/DS-15：扫描 PDF 栅格化方案确定为复用 `liteparse::screenshot(..., Some(vec![1, 2, 3]))`，避免同时绑定 `pdfium-render` 与 `liteparse` 自带 PDFium 动态库导致符号不匹配；临时文件用批次独立 tempdir，结束后清理。

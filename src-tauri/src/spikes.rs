@@ -389,39 +389,89 @@ mod ds09_doc_conversion {
 mod ds11_tesseract {
     // Uses tesseract-rs (same crate liteparse already pulls in).
 
-    fn default_tessdata_dir() -> std::path::PathBuf {
-        if let Ok(path) = std::env::var("TESSDATA_PREFIX") {
-            return path.into();
-        }
-        let home = std::env::var("HOME").expect("DS-11: HOME not set");
+    #[allow(dead_code)]
+    enum TessdataPlatform {
+        Macos,
+        Linux,
+        Windows,
+        Other,
+    }
+
+    fn current_tessdata_platform() -> TessdataPlatform {
         #[cfg(target_os = "macos")]
         {
-            return std::path::PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("tesseract-rs")
-                .join("tessdata");
+            return TessdataPlatform::Macos;
         }
         #[cfg(target_os = "linux")]
         {
-            return std::path::PathBuf::from(home)
-                .join(".tesseract-rs")
-                .join("tessdata");
+            return TessdataPlatform::Linux;
         }
         #[cfg(target_os = "windows")]
         {
-            return std::env::var("APPDATA")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| {
-                    std::path::PathBuf::from(home)
-                        .join("AppData")
-                        .join("Roaming")
-                })
-                .join("tesseract-rs")
-                .join("tessdata");
+            return TessdataPlatform::Windows;
         }
         #[allow(unreachable_code)]
-        std::path::PathBuf::from("tessdata")
+        TessdataPlatform::Other
+    }
+
+    fn resolve_tessdata_dir(
+        platform: TessdataPlatform,
+        tessdata_prefix: Option<&str>,
+        home: Option<&str>,
+        appdata: Option<&str>,
+    ) -> std::path::PathBuf {
+        if let Some(path) = tessdata_prefix {
+            return path.into();
+        }
+        match platform {
+            TessdataPlatform::Macos => std::path::PathBuf::from(home.expect("DS-11: HOME not set"))
+                .join("Library")
+                .join("Application Support")
+                .join("tesseract-rs")
+                .join("tessdata"),
+            TessdataPlatform::Linux => std::path::PathBuf::from(home.expect("DS-11: HOME not set"))
+                .join(".tesseract-rs")
+                .join("tessdata"),
+            TessdataPlatform::Windows => appdata
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    home.map(|home| {
+                        std::path::PathBuf::from(home)
+                            .join("AppData")
+                            .join("Roaming")
+                    })
+                })
+                .expect("DS-11: APPDATA or HOME not set")
+                .join("tesseract-rs")
+                .join("tessdata"),
+            TessdataPlatform::Other => std::path::PathBuf::from("tessdata"),
+        }
+    }
+
+    fn default_tessdata_dir() -> std::path::PathBuf {
+        resolve_tessdata_dir(
+            current_tessdata_platform(),
+            std::env::var("TESSDATA_PREFIX").ok().as_deref(),
+            std::env::var("HOME").ok().as_deref(),
+            std::env::var("APPDATA").ok().as_deref(),
+        )
+    }
+
+    #[test]
+    fn windows_tessdata_dir_uses_appdata_without_home() {
+        let path = resolve_tessdata_dir(
+            TessdataPlatform::Windows,
+            None,
+            None,
+            Some(r"C:\Users\runneradmin\AppData\Roaming"),
+        );
+
+        assert_eq!(
+            path,
+            std::path::PathBuf::from(r"C:\Users\runneradmin\AppData\Roaming")
+                .join("tesseract-rs")
+                .join("tessdata")
+        );
     }
 
     #[test]
