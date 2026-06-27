@@ -196,14 +196,23 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $smokeReport = Join-Path $env:RUNNER_TEMP "rustitler-offline-smoke-report-windows.json"
+          $appDataDir = Join-Path $env:RUNNER_TEMP "rustitler-smoke-data"
           & "${{ steps.install.outputs.exe }}" `
             --offline-smoke-test `
             --resource-dir "${{ steps.install.outputs.resource_dir }}" `
-            --app-data-dir (Join-Path $env:RUNNER_TEMP "rustitler-smoke-data") `
+            --app-data-dir $appDataDir `
             --report-path $smokeReport `
             --require-ocr
-          if ($LASTEXITCODE -ne 0) {
+          if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
             throw "Packaged Windows smoke test failed with exit code $LASTEXITCODE."
+          }
+          if (-not (Test-Path $smokeReport)) {
+            throw "Packaged Windows smoke test did not write $smokeReport."
+          }
+
+          $report = Get-Content $smokeReport -Raw | ConvertFrom-Json
+          if ($report.status -ne "ok") {
+            throw "Packaged Windows smoke test reported status '$($report.status)'."
           }
 
           Add-Content $env:GITHUB_STEP_SUMMARY "## Windows Offline Smoke Report"
