@@ -227,7 +227,7 @@ pub fn save_settings_snapshot(
 
 pub fn create_batch(conn: &Connection, record: &BatchRecord) -> Result<(), AppError> {
     conn.execute(
-        "INSERT OR REPLACE INTO batches(
+        "INSERT INTO batches(
             batch_id,
             created_at,
             status,
@@ -238,7 +238,17 @@ pub fn create_batch(conn: &Connection, record: &BatchRecord) -> Result<(), AppEr
             skipped,
             failed,
             cancelled
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        ON CONFLICT(batch_id) DO UPDATE SET
+            created_at = excluded.created_at,
+            status = excluded.status,
+            settings_snapshot_id = excluded.settings_snapshot_id,
+            total = excluded.total,
+            output_created = excluded.output_created,
+            pending = excluded.pending,
+            skipped = excluded.skipped,
+            failed = excluded.failed,
+            cancelled = excluded.cancelled",
         params![
             record.batch_id.0,
             record.created_at,
@@ -451,6 +461,103 @@ pub fn get_history_batch(
         summary: batch.summary,
         files,
     }))
+}
+
+pub fn get_history_file_result(
+    conn: &Connection,
+    file_job_id: &FileJobId,
+) -> Result<Option<HistoryFileResult>, AppError> {
+    conn.query_row(
+        "SELECT
+            file_job_id,
+            batch_id,
+            source_path,
+            file_name,
+            file_type,
+            status,
+            recognized_title,
+            confidence,
+            output_path,
+            failure_reason,
+            pending_reason,
+            fingerprint_normalized_path,
+            fingerprint_size_bytes,
+            fingerprint_modified_time,
+            scoring_final_title,
+            scoring_confidence,
+            scoring_decision,
+            error_json
+         FROM file_results
+         WHERE file_job_id = ?1",
+        [file_job_id.0.as_str()],
+        |row| file_result_from_row(conn, row),
+    )
+    .optional()
+    .map_err(|err| history_error(format!("查询文件历史详情失败：{err}")))
+}
+
+pub fn refresh_batch_summary(conn: &Connection, batch_id: &BatchId) -> Result<(), AppError> {
+    let output_created_status = enum_to_db_text(&crate::models::FileStatus::OutputCreated)?;
+    let undoable_status = enum_to_db_text(&crate::models::FileStatus::Undoable)?;
+    let pending_status = enum_to_db_text(&crate::models::FileStatus::Pending)?;
+    let skipped_status = enum_to_db_text(&crate::models::FileStatus::Skipped)?;
+    let failed_status = enum_to_db_text(&crate::models::FileStatus::Failed)?;
+    let cancelled_status = enum_to_db_text(&crate::models::FileStatus::Cancelled)?;
+    let summary = conn
+        .query_row(
+            "SELECT
+                COUNT(*),
+                SUM(CASE WHEN status IN (?2, ?3) THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = ?4 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = ?5 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = ?6 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = ?7 THEN 1 ELSE 0 END)
+             FROM file_results
+             WHERE batch_id = ?1",
+            params![
+                batch_id.0,
+                output_created_status,
+                undoable_status,
+                pending_status,
+                skipped_status,
+                failed_status,
+                cancelled_status,
+            ],
+            |row| {
+                Ok(BatchSummary {
+                    total: i64_to_usize_sql(row.get::<_, i64>(0)?)?,
+                    output_created: i64_to_usize_sql(row.get::<_, i64>(1)?)?,
+                    pending: i64_to_usize_sql(row.get::<_, i64>(2)?)?,
+                    skipped: i64_to_usize_sql(row.get::<_, i64>(3)?)?,
+                    failed: i64_to_usize_sql(row.get::<_, i64>(4)?)?,
+                    cancelled: i64_to_usize_sql(row.get::<_, i64>(5)?)?,
+                })
+            },
+        )
+        .map_err(|err| history_error(format!("重新计算批次汇总失败：{err}")))?;
+
+    conn.execute(
+        "UPDATE batches
+         SET total = ?2,
+             output_created = ?3,
+             pending = ?4,
+             skipped = ?5,
+             failed = ?6,
+             cancelled = ?7
+         WHERE batch_id = ?1",
+        params![
+            batch_id.0,
+            usize_to_i64(summary.total)?,
+            usize_to_i64(summary.output_created)?,
+            usize_to_i64(summary.pending)?,
+            usize_to_i64(summary.skipped)?,
+            usize_to_i64(summary.failed)?,
+            usize_to_i64(summary.cancelled)?,
+        ],
+    )
+    .map_err(|err| history_error(format!("更新批次汇总失败：{err}")))?;
+
+    Ok(())
 }
 
 pub fn find_duplicate_by_fingerprint(
@@ -1107,6 +1214,70 @@ mod tests {
     }
 
     #[test]
+    fn updating_batch_record_preserves_file_results() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_history(dir.path()).unwrap();
+        let snapshot = create_settings_snapshot(&Settings::default());
+        let batch_id = BatchId("batch-upsert".into());
+        let file_job_id = FileJobId("file-upsert".into());
+        save_settings_snapshot(&conn, &snapshot).unwrap();
+        create_batch(
+            &conn,
+            &BatchRecord {
+                batch_id: batch_id.clone(),
+                created_at: "2026-06-26T10:00:00Z".into(),
+                status: BatchStatus::Running,
+                settings_snapshot_id: snapshot.id.clone(),
+                summary: BatchSummary {
+                    total: 1,
+                    output_created: 0,
+                    pending: 0,
+                    skipped: 1,
+                    failed: 0,
+                    cancelled: 0,
+                },
+            },
+        )
+        .unwrap();
+        record_file_result(
+            &conn,
+            &FileResultRecord {
+                file: skipped_file_view_fixture(batch_id.clone(), file_job_id.clone()),
+                source_fingerprint: fingerprint_fixture(),
+                scoring_result: None,
+                error: None,
+                output_kind: None,
+            },
+        )
+        .unwrap();
+
+        create_batch(
+            &conn,
+            &BatchRecord {
+                batch_id: batch_id.clone(),
+                created_at: "2026-06-26T10:00:00Z".into(),
+                status: BatchStatus::Completed,
+                settings_snapshot_id: snapshot.id,
+                summary: BatchSummary {
+                    total: 1,
+                    output_created: 0,
+                    pending: 0,
+                    skipped: 1,
+                    failed: 0,
+                    cancelled: 0,
+                },
+            },
+        )
+        .unwrap();
+
+        let detail = get_history_batch(&conn, &batch_id).unwrap().unwrap();
+
+        assert_eq!(detail.status, BatchStatus::Completed);
+        assert_eq!(detail.files.len(), 1);
+        assert_eq!(detail.files[0].file.file_job_id, file_job_id);
+    }
+
+    #[test]
     fn duplicate_detection_only_uses_output_records() {
         let dir = tempfile::tempdir().unwrap();
         let conn = open_history(dir.path()).unwrap();
@@ -1352,6 +1523,22 @@ mod tests {
             output_path: None,
             failure_reason: Some("可能已处理过".into()),
             pending_reason: Some(PendingReason::DuplicateSuspected),
+        }
+    }
+
+    fn skipped_file_view_fixture(batch_id: BatchId, file_job_id: FileJobId) -> FileJobView {
+        FileJobView {
+            file_job_id,
+            batch_id,
+            source_path: "/input/notes.txt".into(),
+            file_name: "notes.txt".into(),
+            file_type: FileType::Unsupported,
+            status: FileStatus::Skipped,
+            recognized_title: None,
+            confidence: None,
+            output_path: None,
+            failure_reason: Some("不支持的文件格式，已跳过。".into()),
+            pending_reason: Some(PendingReason::UnsupportedFormat),
         }
     }
 

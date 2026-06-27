@@ -21,6 +21,7 @@ pub enum ErrorCode {
     UndoOutputMissing,
     UndoOutputModified,
     InvalidSettings,
+    InvalidCommandArgument,
     Cancelled,
     Internal,
 }

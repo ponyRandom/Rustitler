@@ -73,6 +73,7 @@ export type ErrorCode =
   | "undoOutputMissing"
   | "undoOutputModified"
   | "invalidSettings"
+  | "invalidCommandArgument"
   | "cancelled"
   | "internal";
 

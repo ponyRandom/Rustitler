@@ -495,12 +495,13 @@ mod tests {
         let old_log = dir.path().join("logs").join("rustitler.log");
         std::fs::create_dir_all(old_log.parent().unwrap()).unwrap();
         std::fs::write(&old_log, "{\"date\":\"old\"}\n").unwrap();
+        let rotation_date = (Local::now().date_naive() + chrono::Duration::days(1)).to_string();
 
         let diagnostics = Diagnostics::with_options(
             dir.path(),
             DiagnosticsOptions {
                 max_log_bytes: 1024 * 1024,
-                current_date: "2026-06-27".into(),
+                current_date: rotation_date.clone(),
             },
         )
         .unwrap();
@@ -512,7 +513,7 @@ mod tests {
         assert!(dir
             .path()
             .join("logs")
-            .join("rustitler-2026-06-27-1.log")
+            .join(format!("rustitler-{rotation_date}-1.log"))
             .exists());
     }
 
