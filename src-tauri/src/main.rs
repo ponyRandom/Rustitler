@@ -1,6 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    match rustitler_lib::offline_smoke::run_from_env() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+    }
+
     tauri::Builder::default()
         .setup(|app| {
             use rustitler_lib::commands::{AppState, TauriEventEmitter};

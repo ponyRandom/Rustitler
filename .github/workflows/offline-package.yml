@@ -1,0 +1,292 @@
+name: Offline Package Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - ".github/workflows/offline-package.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/**"
+      - "src-tauri/**"
+      - "src/**"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos-package:
+    name: macOS offline package
+    runs-on: macos-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: macos-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: macos-cargo-registry-
+
+      - name: Cache tesseract-rs build output
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/tesseract-rs
+          key: macos-tesseract-rs-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: macos-tesseract-rs-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS offline bundle
+        run: npm run tauri:build:offline:ci
+
+      - name: Run packaged macOS smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="src-tauri/target/release/bundle/macos/Rustitler.app"
+          binary="$app/Contents/MacOS/Rustitler"
+          resource_dir="$app/Contents/Resources"
+          smoke_report="$RUNNER_TEMP/rustitler-offline-smoke-report-macos.json"
+
+          test -x "$binary"
+          test -f "$resource_dir/tessdata/chi_sim.traineddata"
+
+          "$binary" \
+            --offline-smoke-test \
+            --resource-dir "$resource_dir" \
+            --app-data-dir "$RUNNER_TEMP/rustitler-smoke-data" \
+            --report-path "$smoke_report" \
+            --require-ocr
+
+          {
+            echo "## macOS Offline Smoke Report"
+            echo
+            echo '```json'
+            cat "$smoke_report"
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate macOS package size report
+        run: |
+          npm run package:size-report -- \
+            --platform macos \
+            --output "$RUNNER_TEMP/rustitler-package-size-report-macos.md"
+
+      - name: Upload macOS package artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rustitler-macos-offline-package
+          path: |
+            src-tauri/target/release/bundle
+            ${{ runner.temp }}/rustitler-offline-smoke-report-macos.json
+            ${{ runner.temp }}/rustitler-package-size-report-macos.md
+          if-no-files-found: warn
+
+  windows-package:
+    name: Windows offline package
+    runs-on: windows-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: windows-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-cargo-registry-
+
+      - name: Cache tesseract-rs build output
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Roaming\tesseract-rs
+          key: windows-tesseract-rs-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-tesseract-rs-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows offline bundle
+        run: npm run tauri:build:offline:ci
+
+      - name: Install packaged Windows bundle
+        id: install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installDir = Join-Path $env:RUNNER_TEMP "RustitlerInstall"
+          New-Item -ItemType Directory -Force $installDir | Out-Null
+
+          $installer = Get-ChildItem "src-tauri\target\release\bundle\nsis" -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer was not produced under src-tauri\target\release\bundle\nsis."
+          }
+
+          $process = Start-Process `
+            -FilePath $installer.FullName `
+            -ArgumentList "/S", "/D=$installDir" `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "NSIS installer failed with exit code $($process.ExitCode)."
+          }
+
+          $exe = Get-ChildItem $installDir -Recurse -Filter "Rustitler.exe" | Select-Object -First 1
+          if (-not $exe) {
+            throw "Installed Rustitler.exe was not found under $installDir."
+          }
+
+          $trainedData = Get-ChildItem $installDir -Recurse -Filter "chi_sim.traineddata" | Select-Object -First 1
+          if (-not $trainedData) {
+            throw "Installed chi_sim.traineddata was not found under $installDir."
+          }
+
+          $resourceDir = Split-Path (Split-Path $trainedData.FullName -Parent) -Parent
+          "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "resource_dir=$resourceDir" >> $env:GITHUB_OUTPUT
+
+      - name: Run packaged Windows smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $smokeReport = Join-Path $env:RUNNER_TEMP "rustitler-offline-smoke-report-windows.json"
+          & "${{ steps.install.outputs.exe }}" `
+            --offline-smoke-test `
+            --resource-dir "${{ steps.install.outputs.resource_dir }}" `
+            --app-data-dir (Join-Path $env:RUNNER_TEMP "rustitler-smoke-data") `
+            --report-path $smokeReport `
+            --require-ocr
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows smoke test failed with exit code $LASTEXITCODE."
+          }
+
+          Add-Content $env:GITHUB_STEP_SUMMARY "## Windows Offline Smoke Report"
+          Add-Content $env:GITHUB_STEP_SUMMARY ""
+          Add-Content $env:GITHUB_STEP_SUMMARY '```json'
+          Get-Content $smokeReport | Add-Content $env:GITHUB_STEP_SUMMARY
+          Add-Content $env:GITHUB_STEP_SUMMARY '```'
+
+      - name: Generate Windows package size report
+        shell: pwsh
+        run: |
+          npm run package:size-report -- `
+            --platform windows `
+            --output (Join-Path $env:RUNNER_TEMP "rustitler-package-size-report-windows.md")
+
+      - name: Upload Windows package artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rustitler-windows-offline-package
+          path: |
+            src-tauri/target/release/bundle
+            ${{ runner.temp }}/rustitler-offline-smoke-report-windows.json
+            ${{ runner.temp }}/rustitler-package-size-report-windows.md
+          if-no-files-found: warn
+
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs:
+      - macos-package
+      - windows-package
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          find release-artifacts -type f \
+            \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.md" -o -name "*.json" \) \
+            -print0 |
+            while IFS= read -r -d '' file; do
+              artifact="$(echo "$file" | cut -d/ -f2)"
+              name="$(basename "$file")"
+              cp "$file" "release-assets/${artifact}-${name}"
+            done
+
+          find release-assets -maxdepth 1 -type f -print | sort
+          test "$(find release-assets -type f | wc -l)" -gt 0
+
+      - name: Create or update release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          {
+            echo "Rustitler ${tag}"
+            echo
+            echo "Offline package validation artifacts from GitHub Actions."
+            echo
+            echo "- macOS and Windows bundles were built with \`offline-bundle\`."
+            echo "- Packaged-binary smoke tests verified bundled OCR assets, image OCR, settings, and history."
+            echo "- Package size reports are attached as release assets."
+            echo
+            echo "Note: LibreOffice \`.doc\` conversion remains pending until real LibreOffice runtime assets are bundled."
+          } > "$notes_file"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/* --clobber
+          else
+            gh release create "$tag" release-assets/* \
+              --title "$tag" \
+              --notes-file "$notes_file"
+          fi

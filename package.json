@@ -7,6 +7,12 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "test:offline-assets": "node --test scripts/prepare-offline-assets.node-test.mjs",
+    "test:package-size-report": "node --test scripts/package-size-report.node-test.mjs",
+    "prepare:offline-assets": "node scripts/prepare-offline-assets.mjs",
+    "package:size-report": "node scripts/package-size-report.mjs",
+    "tauri:build:offline": "npm run prepare:offline-assets && tauri build --features offline-bundle",
+    "tauri:build:offline:ci": "npm run prepare:offline-assets -- --download && tauri build --features offline-bundle",
     "preview": "vite preview"
   },
   "dependencies": {

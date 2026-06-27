@@ -37,13 +37,17 @@ undoc = { version = "*", optional = true }
 # DS-11..13: Tesseract OCR — use tesseract-rs (same lib liteparse already pulls in,
 # avoids duplicate native-link conflict with tesseract-sys).
 tesseract-rs = { version = "0.2", optional = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 
 [features]
 default = []
 # Enable runtime extraction adapters. Kept non-default until packaging/offline
 # work finalizes OCR assets and Windows debug linking constraints.
 extraction-deps = ["dep:liteparse", "dep:undoc"]
-extraction-ocr = ["extraction-deps", "dep:tesseract-rs"]
+extraction-ocr = ["extraction-deps", "dep:tesseract-rs", "dep:image"]
+# Release packaging profile: enable all offline document extraction engines
+# and bundled OCR language-data resolution.
+offline-bundle = ["extraction-ocr"]
 # Enable all dependency spikes for validation:
 #   cargo test --features spikes 2>&1 | tee doc/tasks/spike-results.txt
 spikes = ["dep:liteparse", "dep:undoc", "dep:tesseract-rs"]

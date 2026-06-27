@@ -5,7 +5,7 @@ use crate::errors::{AppError, ErrorCategory, ErrorCode, ProcessingStage};
 use crate::extract::ExtractRequest;
 #[cfg(feature = "extraction-deps")]
 use crate::extract::{self, ExtractionServices, SofficeDocConverter};
-#[cfg(feature = "extraction-deps")]
+#[cfg(all(feature = "extraction-deps", not(feature = "extraction-ocr")))]
 use crate::extract::{OcrExtractor, OcrPage, OcrPageInput};
 use crate::history::{self, FileResultRecord, OutputKind};
 use crate::models::{
@@ -112,6 +112,11 @@ impl DefaultExtractor {
     pub fn new(runtime_assets: Option<RuntimeAssets>) -> Self {
         Self { runtime_assets }
     }
+
+    #[cfg(all(test, feature = "extraction-ocr"))]
+    fn ocr_tessdata_dir_for_tests(&self) -> PathBuf {
+        crate::packaging::resolve_tessdata_dir(self.runtime_assets.as_ref())
+    }
 }
 
 impl Extractor for DefaultExtractor {
@@ -134,7 +139,7 @@ fn default_extract(
     let doc_converter = SofficeDocConverter::discover_with_assets(runtime_assets);
     let pdf = extract::LiteparsePdfTextExtractor;
     let rasterizer = extract::LiteparsePdfRasterizer;
-    let ocr = UnavailableOcrExtractor;
+    let ocr = default_ocr_extractor(runtime_assets);
     let services = ExtractionServices {
         docx: &docx,
         doc_converter: &doc_converter,
@@ -144,6 +149,16 @@ fn default_extract(
     };
 
     extract::extract_document_with_services(request, &services, work_dir)
+}
+
+#[cfg(feature = "extraction-ocr")]
+fn default_ocr_extractor(runtime_assets: Option<&RuntimeAssets>) -> extract::TesseractOcrExtractor {
+    extract::TesseractOcrExtractor::new(crate::packaging::resolve_tessdata_dir(runtime_assets))
+}
+
+#[cfg(all(feature = "extraction-deps", not(feature = "extraction-ocr")))]
+fn default_ocr_extractor(_runtime_assets: Option<&RuntimeAssets>) -> UnavailableOcrExtractor {
+    UnavailableOcrExtractor
 }
 
 #[cfg(not(feature = "extraction-deps"))]
@@ -163,10 +178,10 @@ fn default_extract(
     })
 }
 
-#[cfg(feature = "extraction-deps")]
+#[cfg(all(feature = "extraction-deps", not(feature = "extraction-ocr")))]
 struct UnavailableOcrExtractor;
 
-#[cfg(feature = "extraction-deps")]
+#[cfg(all(feature = "extraction-deps", not(feature = "extraction-ocr")))]
 impl OcrExtractor for UnavailableOcrExtractor {
     fn extract_pages(&self, _pages: &[OcrPageInput]) -> Result<Vec<OcrPage>, AppError> {
         Err(AppError {
@@ -680,6 +695,18 @@ mod tests {
 
         assert_eq!(error.code, ErrorCode::InvalidSettings);
         assert_eq!(error.category, ErrorCategory::Settings);
+    }
+
+    #[cfg(feature = "extraction-ocr")]
+    #[test]
+    fn default_extractor_uses_tesseract_ocr_with_runtime_assets() {
+        let assets = RuntimeAssets::new("/bundle/resources");
+        let extractor = DefaultExtractor::new(Some(assets.clone()));
+
+        assert_eq!(
+            extractor.ocr_tessdata_dir_for_tests(),
+            assets.resource_dir().join("tessdata")
+        );
     }
 
     fn test_state() -> AppState {

@@ -94,6 +94,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Prepare offline OCR assets
+        shell: pwsh
+        run: npm run prepare:offline-assets -- --download
+
       - name: Build frontend
         run: npm run build
 
@@ -114,7 +118,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --verbose
+          args: --verbose --features offline-bundle
 
       - name: Upload Windows bundles
         uses: actions/upload-artifact@v4

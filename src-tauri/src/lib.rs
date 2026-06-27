@@ -1,5 +1,6 @@
 pub mod errors;
 pub mod models;
+pub mod offline_smoke;
 pub mod packaging;
 
 // Module stubs — implemented in subsequent tasks per progress.md

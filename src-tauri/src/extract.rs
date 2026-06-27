@@ -305,6 +305,41 @@ impl PdfRasterizer for LiteparsePdfRasterizer {
     }
 }
 
+#[cfg(feature = "extraction-ocr")]
+#[derive(Debug, Clone)]
+pub struct TesseractOcrExtractor {
+    tessdata_dir: PathBuf,
+    language: String,
+}
+
+#[cfg(feature = "extraction-ocr")]
+impl TesseractOcrExtractor {
+    pub fn new(tessdata_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            tessdata_dir: tessdata_dir.into(),
+            language: "chi_sim".into(),
+        }
+    }
+
+    pub fn tessdata_dir(&self) -> &Path {
+        &self.tessdata_dir
+    }
+
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+}
+
+#[cfg(feature = "extraction-ocr")]
+impl OcrExtractor for TesseractOcrExtractor {
+    fn extract_pages(&self, pages: &[OcrPageInput]) -> Result<Vec<OcrPage>, AppError> {
+        pages
+            .iter()
+            .map(|page| extract_tesseract_page(page, &self.tessdata_dir, &self.language))
+            .collect()
+    }
+}
+
 pub struct BatchTempDir {
     path: PathBuf,
 }
@@ -570,6 +605,96 @@ fn extracted_page_from_ocr(page: OcrPage) -> ExtractedPage {
         unit: SourceUnit::Pixel,
         blocks: page.blocks,
     }
+}
+
+#[cfg(feature = "extraction-ocr")]
+fn extract_tesseract_page(
+    page: &OcrPageInput,
+    tessdata_dir: &Path,
+    language: &str,
+) -> Result<OcrPage, AppError> {
+    let image = image::open(&page.image_path)
+        .map_err(|err| adapter_error(&page.image_path, err))?
+        .to_rgb8();
+    let width = image.width();
+    let height = image.height();
+    let bytes_per_pixel = 3;
+    let bytes_per_line = width as i32 * bytes_per_pixel;
+    let image_data = image.into_raw();
+
+    let api = tesseract_rs::TesseractAPI::new();
+    api.init(tessdata_dir, language)
+        .map_err(|err| adapter_error(&page.image_path, err))?;
+    api.set_page_seg_mode(tesseract_rs::TessPageSegMode::PSM_SPARSE_TEXT)
+        .map_err(|err| adapter_error(&page.image_path, err))?;
+    api.set_image(
+        &image_data,
+        width as i32,
+        height as i32,
+        bytes_per_pixel,
+        bytes_per_line,
+    )
+    .map_err(|err| adapter_error(&page.image_path, err))?;
+    api.recognize()
+        .map_err(|err| adapter_error(&page.image_path, err))?;
+
+    let blocks = collect_tesseract_blocks(&api, width, height, &page.image_path)?;
+
+    Ok(OcrPage {
+        page_index: page.page_index,
+        width: if page.width > 0 { page.width } else { width },
+        height: if page.height > 0 { page.height } else { height },
+        blocks,
+    })
+}
+
+#[cfg(feature = "extraction-ocr")]
+fn collect_tesseract_blocks(
+    api: &tesseract_rs::TesseractAPI,
+    width: u32,
+    height: u32,
+    path: &Path,
+) -> Result<Vec<LayoutBlock>, AppError> {
+    let iterator = match api.get_iterator() {
+        Ok(iterator) => iterator,
+        Err(_) => return Ok(vec![]),
+    };
+    let mut blocks = vec![];
+
+    loop {
+        match iterator.get_current_word() {
+            Ok((text, left, top, right, bottom, confidence)) if !text.trim().is_empty() => {
+                let raw_bbox = RawBox {
+                    x0: left as f32,
+                    y0: top as f32,
+                    x1: right as f32,
+                    y1: bottom as f32,
+                };
+                blocks.push(LayoutBlock {
+                    text: text.trim().to_string(),
+                    bbox: normalize_box(&raw_bbox, width as f32, height as f32),
+                    raw_bbox: Some(raw_bbox),
+                    font_size: None,
+                    bold: None,
+                    ocr_confidence: Some(confidence),
+                    line_index: None,
+                });
+            }
+            Ok(_) => {}
+            Err(err) => {
+                return Err(adapter_error(path, err));
+            }
+        }
+
+        if !iterator
+            .next_word()
+            .map_err(|err| adapter_error(path, err))?
+        {
+            break;
+        }
+    }
+
+    Ok(blocks)
 }
 
 fn unsupported_format_error(path: &Path) -> AppError {
@@ -854,6 +979,15 @@ mod tests {
         assert_eq!(doc.pages[0].height, 600.0);
         assert_eq!(doc.pages[0].blocks[0].ocr_confidence, Some(90.0));
         assert_eq!(services.ocr.last_inputs.borrow()[0].image_path, source);
+    }
+
+    #[cfg(feature = "extraction-ocr")]
+    #[test]
+    fn tesseract_ocr_extractor_uses_configured_tessdata_dir() {
+        let extractor = TesseractOcrExtractor::new("/bundle/tessdata");
+
+        assert_eq!(extractor.tessdata_dir(), Path::new("/bundle/tessdata"));
+        assert_eq!(extractor.language(), "chi_sim");
     }
 
     #[test]
