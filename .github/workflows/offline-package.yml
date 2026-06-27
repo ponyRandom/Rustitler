@@ -65,7 +65,7 @@ jobs:
         run: npm ci
 
       - name: Validate offline package workflow
-        run: npm run test:offline-package-workflow
+        run: npm run test:node-scripts
 
       - name: Build macOS offline bundle
         run: npm run tauri:build:offline:ci
@@ -156,7 +156,7 @@ jobs:
         run: npm ci
 
       - name: Validate offline package workflow
-        run: npm run test:offline-package-workflow
+        run: npm run test:node-scripts
 
       - name: Build Windows offline bundle
         run: npm run tauri:build:offline:ci
@@ -247,9 +247,14 @@ jobs:
       - name: Generate Windows package size report
         shell: pwsh
         run: |
+          $sizeReport = Join-Path $env:RUNNER_TEMP "rustitler-package-size-report-windows.md"
           npm run package:size-report -- `
             --platform windows `
-            --output (Join-Path $env:RUNNER_TEMP "rustitler-package-size-report-windows.md")
+            --output $sizeReport
+          if (-not (Test-Path $sizeReport)) {
+            throw "Windows package size report was not written to $sizeReport."
+          }
+          Get-Content $sizeReport
 
       - name: Upload Windows package artifacts
         uses: actions/upload-artifact@v4

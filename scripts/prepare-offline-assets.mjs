@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { isMainModule } from "./module-entry.mjs";
 
 const CHI_SIM_URL =
   "https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata";
@@ -134,7 +135,7 @@ async function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   main().catch((error) => {
     console.error(error.message);
     process.exit(1);

@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { isMainModule } from "./module-entry.mjs";
 
 export function formatBytes(bytes) {
   if (bytes < 1024) {
@@ -139,7 +140,7 @@ function main() {
   console.log(markdown);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   try {
     main();
   } catch (error) {
