@@ -17,9 +17,18 @@ test("destinationTessdataPath points at Tauri tessdata resources", () => {
 });
 
 test("findChiSimSource prefers explicit source then env prefixes then platform defaults", () => {
+  const envPrefixSource = path.join("/env-prefix", "chi_sim.traineddata");
+  const homeSource = path.join(
+    "/home",
+    "Library",
+    "Application Support",
+    "tesseract-rs",
+    "tessdata",
+    "chi_sim.traineddata",
+  );
   const existing = new Set([
-    "/env-prefix/chi_sim.traineddata",
-    "/home/Library/Application Support/tesseract-rs/tessdata/chi_sim.traineddata",
+    envPrefixSource,
+    homeSource,
   ]);
 
   assert.equal(
@@ -37,7 +46,7 @@ test("findChiSimSource prefers explicit source then env prefixes then platform d
       platform: "darwin",
       exists: (candidate) => existing.has(candidate),
     }),
-    "/env-prefix/chi_sim.traineddata",
+    envPrefixSource,
   );
 });
 

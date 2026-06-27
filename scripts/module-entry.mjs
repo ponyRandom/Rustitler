@@ -6,7 +6,8 @@ export function isMainModule(importMetaUrl, argvPath) {
 
 function toFileUrl(filePath) {
   if (/^[A-Za-z]:[\\/]/.test(filePath)) {
-    return pathToFileURL(`/${filePath.replaceAll("\\", "/")}`).href;
+    const [drive, ...segments] = filePath.replaceAll("\\", "/").split("/");
+    return `file:///${drive}/${segments.map(encodeURIComponent).join("/")}`;
   }
   return pathToFileURL(filePath).href;
 }
