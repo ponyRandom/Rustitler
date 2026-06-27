@@ -290,3 +290,9 @@ export interface UndoResult {
   skippedMissing: number;
   skippedModified: number;
 }
+
+export type TauriDragDropEvent =
+  | { type: "enter"; paths: string[]; position: { x: number; y: number } }
+  | { type: "over"; position: { x: number; y: number } }
+  | { type: "drop"; paths: string[]; position: { x: number; y: number } }
+  | { type: "leave" };

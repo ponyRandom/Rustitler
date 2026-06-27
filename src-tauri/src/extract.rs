@@ -139,22 +139,15 @@ impl SofficeDocConverter {
     }
 
     pub fn discover() -> Option<Self> {
-        std::env::var_os("RUSTITLER_SOFFICE")
-            .map(PathBuf::from)
-            .filter(|path| path.exists())
-            .map(Self::new)
-            .or_else(|| {
-                [
-                    "/opt/homebrew/bin/soffice",
-                    "/usr/local/bin/soffice",
-                    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-                    "soffice",
-                ]
-                .into_iter()
-                .map(PathBuf::from)
-                .find(|path| path.exists() || path.as_os_str() == "soffice")
-                .map(Self::new)
-            })
+        Some(Self::new(crate::packaging::resolve_soffice_path(None)))
+    }
+
+    pub fn discover_with_assets(assets: Option<&crate::packaging::RuntimeAssets>) -> Self {
+        Self::new(crate::packaging::resolve_soffice_path(assets))
+    }
+
+    pub fn soffice_path(&self) -> &Path {
+        &self.soffice_path
     }
 }
 

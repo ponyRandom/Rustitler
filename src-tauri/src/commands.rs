@@ -12,6 +12,7 @@ use crate::models::{
     BatchEvent, BatchId, BatchState, ExtractedDocument, FileJobId, FileJobView, FileStatus,
     HistoryBatchDetail, HistoryBatchPage, Settings, UndoResult,
 };
+use crate::packaging::RuntimeAssets;
 use crate::{rename, settings};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -22,6 +23,7 @@ const BATCH_EVENT_NAME: &str = "batch-event";
 #[derive(Clone)]
 pub struct AppState {
     app_data_dir: PathBuf,
+    runtime_assets: Option<RuntimeAssets>,
     scheduler: BatchScheduler,
     event_emitter: Arc<dyn CommandEventEmitter>,
 }
@@ -35,13 +37,23 @@ impl AppState {
         history::open_history(&app_data_dir)?;
         Ok(Self {
             app_data_dir,
+            runtime_assets: None,
             scheduler: BatchScheduler::default(),
             event_emitter,
         })
     }
 
+    pub fn with_runtime_assets(mut self, runtime_assets: RuntimeAssets) -> Self {
+        self.runtime_assets = Some(runtime_assets);
+        self
+    }
+
     pub fn app_data_dir(&self) -> &Path {
         &self.app_data_dir
+    }
+
+    pub fn runtime_assets(&self) -> Option<&RuntimeAssets> {
+        self.runtime_assets.as_ref()
     }
 
     #[cfg(test)]
@@ -91,7 +103,16 @@ impl EventSink for CommandEventSink<'_> {
     }
 }
 
-pub struct DefaultExtractor;
+#[derive(Clone, Default)]
+pub struct DefaultExtractor {
+    runtime_assets: Option<RuntimeAssets>,
+}
+
+impl DefaultExtractor {
+    pub fn new(runtime_assets: Option<RuntimeAssets>) -> Self {
+        Self { runtime_assets }
+    }
+}
 
 impl Extractor for DefaultExtractor {
     fn extract(
@@ -99,7 +120,7 @@ impl Extractor for DefaultExtractor {
         request: &ExtractRequest,
         work_dir: &Path,
     ) -> Result<ExtractedDocument, AppError> {
-        default_extract(request, work_dir)
+        default_extract(request, work_dir, self.runtime_assets.as_ref())
     }
 }
 
@@ -107,10 +128,10 @@ impl Extractor for DefaultExtractor {
 fn default_extract(
     request: &ExtractRequest,
     work_dir: &Path,
+    runtime_assets: Option<&RuntimeAssets>,
 ) -> Result<ExtractedDocument, AppError> {
     let docx = extract::UndocDocxTextExtractor;
-    let doc_converter =
-        SofficeDocConverter::discover().unwrap_or_else(|| SofficeDocConverter::new("soffice"));
+    let doc_converter = SofficeDocConverter::discover_with_assets(runtime_assets);
     let pdf = extract::LiteparsePdfTextExtractor;
     let rasterizer = extract::LiteparsePdfRasterizer;
     let ocr = UnavailableOcrExtractor;
@@ -129,6 +150,7 @@ fn default_extract(
 fn default_extract(
     request: &ExtractRequest,
     _work_dir: &Path,
+    _runtime_assets: Option<&RuntimeAssets>,
 ) -> Result<ExtractedDocument, AppError> {
     Err(AppError {
         code: ErrorCode::Internal,
@@ -183,7 +205,7 @@ pub fn start_batch_impl(
 
     let input_paths = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
     let history = Mutex::new(history::open_history(&state.app_data_dir)?);
-    let extractor = DefaultExtractor;
+    let extractor = DefaultExtractor::new(state.runtime_assets.clone());
     let output = DefaultOutputCreator;
     let events = CommandEventSink {
         emitter: state.event_emitter.as_ref(),

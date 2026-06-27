@@ -4,13 +4,16 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             use rustitler_lib::commands::{AppState, TauriEventEmitter};
+            use rustitler_lib::packaging::runtime_assets_from_resource_dir;
             use tauri::Manager;
 
             let app_data_dir = app.path().app_data_dir()?;
+            let resource_dir = app.path().resource_dir()?;
             let state = AppState::new(
                 app_data_dir,
                 std::sync::Arc::new(TauriEventEmitter::new(app.handle().clone())),
-            )?;
+            )?
+            .with_runtime_assets(runtime_assets_from_resource_dir(resource_dir));
             app.manage(state);
             Ok(())
         })
