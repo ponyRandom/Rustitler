@@ -196,8 +196,8 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $smokeReport = Join-Path $env:RUNNER_TEMP "rustitler-offline-smoke-report-windows.json"
-          $smokeStdout = Join-Path $env:RUNNER_TEMP "rustitler-offline-smoke-stdout-windows.txt"
           $appDataDir = Join-Path $env:RUNNER_TEMP "rustitler-smoke-data"
+          $env:RUSTITLER_SMOKE_REPORT_PATH = $smokeReport
 
           $arguments = @(
             "--offline-smoke-test",
@@ -206,24 +206,14 @@ jobs:
             "--report-path", $smokeReport,
             "--require-ocr"
           )
-          $smokeOutput = & "${{ steps.install.outputs.exe }}" @arguments 2>&1
+          & "${{ steps.install.outputs.exe }}" @arguments
           $exitCode = $LASTEXITCODE
-          $smokeOutput | ForEach-Object { Write-Output $_ }
-          $smokeOutput | Set-Content $smokeStdout
 
           if ($null -ne $exitCode -and $exitCode -ne 0) {
             throw "Packaged Windows smoke test failed with exit code $exitCode."
           }
           if (-not (Test-Path $smokeReport)) {
-            $stdout = $smokeOutput | Out-String
-            $jsonStart = $stdout.IndexOf("{")
-            $jsonEnd = $stdout.LastIndexOf("}")
-            if ($jsonStart -ge 0 -and $jsonEnd -ge $jsonStart) {
-              $stdout.Substring($jsonStart, $jsonEnd - $jsonStart + 1) | Set-Content $smokeReport
-            }
-          }
-          if (-not (Test-Path $smokeReport)) {
-            throw "Packaged Windows smoke test did not write $smokeReport and no JSON report was found in stdout."
+            throw "Packaged Windows smoke test did not write $smokeReport."
           }
 
           $report = Get-Content $smokeReport -Raw | ConvertFrom-Json

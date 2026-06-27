@@ -86,6 +86,13 @@ impl SmokeTestConfig {
             require_ocr,
         }))
     }
+
+    fn with_report_path_fallback(mut self, fallback: Option<OsString>) -> Self {
+        if self.report_path.is_none() {
+            self.report_path = fallback.map(PathBuf::from);
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -128,6 +135,7 @@ pub fn run_from_env() -> Result<bool, AppError> {
     let Some(config) = SmokeTestConfig::parse(std::env::args_os())? else {
         return Ok(false);
     };
+    let config = config.with_report_path_fallback(std::env::var_os("RUSTITLER_SMOKE_REPORT_PATH"));
 
     let report = run_smoke_test(&config)?;
     let json = serde_json::to_string_pretty(&report)
@@ -385,5 +393,34 @@ mod tests {
         assert_eq!(value["checks"]["tessdataPresent"], true);
         assert_eq!(value["checks"]["sofficePresent"], false);
         assert_eq!(value["checks"]["imageOcr"], "skipped");
+    }
+
+    #[test]
+    fn report_path_fallback_uses_environment_when_arg_is_missing() {
+        let config = SmokeTestConfig {
+            resource_dir: PathBuf::from("/resources"),
+            app_data_dir: PathBuf::from("/data"),
+            report_path: None,
+            require_ocr: false,
+        }
+        .with_report_path_fallback(Some(OsString::from("/tmp/report.json")));
+
+        assert_eq!(config.report_path, Some(PathBuf::from("/tmp/report.json")));
+    }
+
+    #[test]
+    fn report_path_fallback_preserves_explicit_arg() {
+        let config = SmokeTestConfig {
+            resource_dir: PathBuf::from("/resources"),
+            app_data_dir: PathBuf::from("/data"),
+            report_path: Some(PathBuf::from("/tmp/explicit.json")),
+            require_ocr: false,
+        }
+        .with_report_path_fallback(Some(OsString::from("/tmp/env.json")));
+
+        assert_eq!(
+            config.report_path,
+            Some(PathBuf::from("/tmp/explicit.json"))
+        );
     }
 }
