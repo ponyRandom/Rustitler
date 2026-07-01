@@ -14,3 +14,10 @@ test("desktop dev script enables document extraction dependencies", () => {
     "npm run prepare:offline-assets && tauri dev --features offline-bundle",
   );
 });
+
+test("desktop build script enables document extraction dependencies", () => {
+  assert.equal(
+    packageJson.scripts["tauri:build:offline"],
+    "npm run prepare:offline-assets && tauri build --features offline-bundle",
+  );
+});

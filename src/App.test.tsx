@@ -71,6 +71,13 @@ const renderApp = async () => {
   return render(<App />);
 };
 
+const waitForQueueReady = async () => {
+  const toolbar = screen.getByRole("banner", { name: "应用工具栏" });
+  await waitFor(() =>
+    expect(within(toolbar).getByRole("button", { name: "导入文件" })).toBeEnabled(),
+  );
+};
+
 describe("App", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -169,11 +176,20 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("设置已保存")).toBeInTheDocument());
   });
 
+  it("renders the macOS shell", async () => {
+    await renderApp();
+
+    expect(screen.getByRole("navigation", { name: "主导航" })).toHaveClass("sidebar-nav");
+    expect(screen.getByRole("banner", { name: "应用工具栏" })).toHaveClass("toolbar");
+    expect(screen.queryByRole("status", { name: "服务状态" })).not.toBeInTheDocument();
+    expect(screen.queryByText("服务正常")).not.toBeInTheDocument();
+  });
+
   it("starts a batch from dropped file paths", async () => {
     await renderApp();
 
     await waitFor(() => expect(mocks.dropHandler).toBeDefined());
-    await waitFor(() => expect(screen.getByText("支持 PDF、Word、图片；文件夹仅扫描第一层。")).toBeInTheDocument());
+    await waitForQueueReady();
     act(() => {
       mocks.dropHandler?.(["/input/a.pdf", "/input/folder"]);
     });
@@ -207,15 +223,128 @@ describe("App", () => {
   it("offers explicit file and folder import actions", async () => {
     await renderApp();
 
-    expect(screen.getByRole("button", { name: "导入文件" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导入文件夹" })).toBeInTheDocument();
+    const toolbar = screen.getByRole("banner", { name: "应用工具栏" });
+    expect(within(toolbar).getByRole("button", { name: "导入文件" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "导入文件夹" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "选择文件" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "选择文件夹" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the empty queue as a composed panel instead of a horizontally scrolling table", async () => {
+    await renderApp();
+
+    expect(screen.getByRole("status", { name: "队列为空" })).toHaveClass("queue-empty");
+    expect(screen.queryByRole("table", { name: "文件队列" })).not.toBeInTheDocument();
+  });
+
+  it("uses a macOS queue workspace", async () => {
+    await renderApp();
+
+    await waitForQueueReady();
+    expect(screen.getByRole("region", { name: "队列工作区" })).toHaveClass("queue-layout");
+    expect(screen.getByRole("region", { name: "文件队列" })).toHaveClass("queue-panel");
+    expect(screen.getByRole("complementary", { name: "文件检查器" })).toHaveClass("detail-panel");
+    expect(screen.queryByText("支持 PDF、Word、图片；文件夹仅扫描第一层。")).not.toBeInTheDocument();
+    expect(screen.queryByText("导入文件后，这里会按文件展示状态、标题和输出结果。")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("选择一个队列项查看文件地址、最终标题、候选标题和重复提示。"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("banner", { name: "应用工具栏" })).getByRole("button", { name: "导入文件" }),
+    ).toBeEnabled();
+  });
+
+  it("renders completed queue rows as selected file cards with visible status text", async () => {
+    let emitBatchEvent: ((event: unknown) => void) | undefined;
+    mocks.subscribeBatchEvents.mockImplementation(async (handler) => {
+      emitBatchEvent = handler;
+      return () => undefined;
+    });
+    await renderApp();
+
+    await waitFor(() => expect(emitBatchEvent).toBeDefined());
+    act(() => {
+      emitBatchEvent?.({ type: "BatchStarted", batchId: "batch-1", createdAt: "now", totalFiles: 1 });
+      emitBatchEvent?.({
+        type: "FileQueued",
+        batchId: "batch-1",
+        file: fileView({
+          fileJobId: "file-complete",
+          fileName: "done.pdf",
+          sourcePath: "/input/done.pdf",
+          status: "outputCreated",
+          recognizedTitle: "已完成标题",
+          confidence: 100,
+          outputPath: "/input/Rustitler 输出/已完成标题.pdf",
+        }),
+      });
+    });
+
+    const fileCard = screen.getByRole("button", { name: /done\.pdf/ });
+    expect(fileCard).toHaveClass("file-card", "selected");
+    expect(within(fileCard).getByText("已输出")).toBeVisible();
+    expect(within(fileCard).getByText("100%")).toBeVisible();
+  });
+
+  it("renders history batches as compact cards without exposing long ids in the visible list", async () => {
+    const longBatchId = "20f4ecce-7718-4eac-94bc-b30926330aad";
+    mocks.listHistory.mockResolvedValue({
+      total: 1,
+      batches: [
+        {
+          batchId: longBatchId,
+          createdAt: "2026-06-29T14:38:17.960285+00:00",
+          status: "completed",
+          settingsSnapshotId: "settings-1",
+          summary: {
+            total: 1,
+            outputCreated: 1,
+            pending: 0,
+            skipped: 0,
+            failed: 0,
+            cancelled: 0,
+          },
+        },
+      ],
+    });
+
+    await renderApp();
+    fireEvent.click(screen.getByRole("button", { name: "历史" }));
+
+    const historyList = await screen.findByRole("list", { name: "历史批次" });
+    expect(within(historyList).getByText("20f4ecce...30aad")).toBeInTheDocument();
+    expect(within(historyList).queryByText(longBatchId)).not.toBeInTheDocument();
+    expect(within(historyList).getByRole("button", { name: "查看详情" })).toHaveClass("secondary");
+  });
+
+  it("separates settings content from the bottom action bar", async () => {
+    await renderApp();
+
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+
+    const settingsRegion = await screen.findByRole("region", { name: "设置" });
+    expect(within(settingsRegion).getByLabelText("设置内容")).toHaveClass("settings-content");
+    expect(within(settingsRegion).getByRole("group", { name: "设置操作" })).toHaveClass("settings-footer");
+    expect(within(settingsRegion).getByRole("list", { name: "关键词和正则规则" })).toBeInTheDocument();
+  });
+
+  it("keeps history and settings in macOS groups", async () => {
+    await renderApp();
+
+    fireEvent.click(screen.getByRole("button", { name: "历史" }));
+    expect(await screen.findByRole("complementary", { name: "批次检查器" })).toHaveClass("detail-panel");
+
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const settingsRegion = await screen.findByRole("region", { name: "设置" });
+    expect(within(settingsRegion).getByRole("group", { name: "评分设置" })).toHaveClass("settings-panel");
+    expect(within(settingsRegion).getByRole("group", { name: "关键词规则" })).toHaveClass("settings-panel");
   });
 
   it("starts a batch from selected files", async () => {
     mocks.selectFiles.mockResolvedValue(["/input/a.pdf", "/input/b.docx"]);
     await renderApp();
 
-    await waitFor(() => expect(screen.getByText("支持 PDF、Word、图片；文件夹仅扫描第一层。")).toBeInTheDocument());
+    await waitForQueueReady();
     fireEvent.click(screen.getByRole("button", { name: "导入文件" }));
 
     await waitFor(() =>
@@ -227,7 +356,7 @@ describe("App", () => {
     mocks.selectFiles.mockRejectedValue(new Error("dialog not available"));
     await renderApp();
 
-    await waitFor(() => expect(screen.getByText("支持 PDF、Word、图片；文件夹仅扫描第一层。")).toBeInTheDocument());
+    await waitForQueueReady();
     fireEvent.click(screen.getByRole("button", { name: "导入文件" }));
 
     expect(await screen.findByText("dialog not available")).toBeInTheDocument();
@@ -241,7 +370,7 @@ describe("App", () => {
     });
     await renderApp();
 
-    await waitFor(() => expect(screen.getByText("支持 PDF、Word、图片；文件夹仅扫描第一层。")).toBeInTheDocument());
+    await waitForQueueReady();
     fireEvent.click(screen.getByRole("button", { name: "导入文件" }));
 
     expect(await screen.findByText("无法读取所选文件，请检查权限。")).toBeInTheDocument();
@@ -251,7 +380,7 @@ describe("App", () => {
     mocks.selectFolder.mockResolvedValue(["/input/folder"]);
     await renderApp();
 
-    await waitFor(() => expect(screen.getByText("支持 PDF、Word、图片；文件夹仅扫描第一层。")).toBeInTheDocument());
+    await waitForQueueReady();
     fireEvent.click(screen.getByRole("button", { name: "导入文件夹" }));
 
     await waitFor(() =>
@@ -298,14 +427,22 @@ describe("App", () => {
     });
 
     expect(screen.getAllByText("/Users/example/Desktop/Rustitler 输出/新标题.pdf").length).toBeGreaterThan(0);
-    expect(screen.queryByText("失败原因")).not.toBeInTheDocument();
-    expect(screen.queryByText("重复提示")).not.toBeInTheDocument();
+    const detailPanel = screen.getByRole("heading", { name: "详情" }).closest("aside");
+    expect(detailPanel).not.toBeNull();
+    expect(within(detailPanel!).getByText("文件地址")).toBeInTheDocument();
+    expect(within(detailPanel!).getByText("/Users/example/Desktop/2.pdf")).toBeInTheDocument();
+    expect(within(detailPanel!).getByText("疑似重复")).toBeInTheDocument();
+    expect(within(detailPanel!).getByText("可能已处理过，请核对历史输出。")).toBeInTheDocument();
+    expect(within(detailPanel!).queryByText(/batch-old/)).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText(/file-old/)).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText(/旧标题\.pdf/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "处理信息" })).not.toBeInTheDocument();
     expect(screen.queryByText("处理日志")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("文件名主体")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确认输出" })).not.toBeInTheDocument();
   });
 
-  it("shows only the top five title candidates in file details", async () => {
+  it("shows five candidate titles without detailed scoring", async () => {
     let emitBatchEvent: ((event: unknown) => void) | undefined;
     mocks.subscribeBatchEvents.mockImplementation(async (handler) => {
       emitBatchEvent = handler;
@@ -352,15 +489,184 @@ describe("App", () => {
       });
     });
 
-    const candidatesSection = screen.getByRole("heading", { name: "候选标题" }).closest("section");
-
+    const detailPanel = screen.getByRole("heading", { name: "详情" }).closest("aside");
+    expect(detailPanel).not.toBeNull();
+    expect(within(detailPanel!).getByText("最终标题")).toBeInTheDocument();
+    const candidatesSection = within(detailPanel!)
+      .getByRole("heading", { name: "候选标题" })
+      .closest("section");
     expect(candidatesSection).not.toBeNull();
-    expect(within(candidatesSection!).getByText("候选标题 1")).toBeInTheDocument();
-    expect(within(candidatesSection!).getByText("候选标题 5")).toBeInTheDocument();
-    expect(within(candidatesSection!).queryByText("候选标题 6")).not.toBeInTheDocument();
+    expect(
+      within(candidatesSection!).getByRole("group", { name: "候选标题操作" }),
+    ).toContainElement(within(candidatesSection!).getByRole("button", { name: "确认使用该标题" }));
+    const candidateList = within(detailPanel!).getByRole("list", { name: "候选标题列表" });
+    expect(within(candidateList).getByRole("button", { name: "候选标题 1" })).toBeInTheDocument();
+    expect(within(candidateList).getByRole("button", { name: "候选标题 2" })).toBeInTheDocument();
+    expect(within(candidateList).getByRole("button", { name: "候选标题 3" })).toBeInTheDocument();
+    expect(within(candidateList).getByRole("button", { name: "候选标题 4" })).toBeInTheDocument();
+    expect(within(candidateList).getByRole("button", { name: "候选标题 5" })).toBeInTheDocument();
+    expect(within(candidateList).queryByRole("button", { name: "候选标题 6" })).not.toBeInTheDocument();
+    expect(screen.queryByText("版式")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "使用" })).not.toBeInTheDocument();
   });
 
-  it("keeps candidate details collapsed and trims file facts by default", async () => {
+  it("requires explicit confirmation before applying a candidate title", async () => {
+    let emitBatchEvent: ((event: unknown) => void) | undefined;
+    mocks.subscribeBatchEvents.mockImplementation(async (handler) => {
+      emitBatchEvent = handler;
+      return () => undefined;
+    });
+    mocks.selectCandidateTitle.mockResolvedValue(
+      fileView({
+        fileJobId: "file-confirm-candidate",
+        fileName: "confirm.pdf",
+        sourcePath: "/input/confirm.pdf",
+        status: "outputCreated",
+        recognizedTitle: "候选标题 2",
+        confidence: 76,
+        outputPath: "/input/Rustitler 输出/候选标题 2.pdf",
+      }),
+    );
+    await renderApp();
+
+    await waitFor(() => expect(emitBatchEvent).toBeDefined());
+    await waitForQueueReady();
+    act(() => {
+      emitBatchEvent?.({ type: "BatchStarted", batchId: "batch-1", createdAt: "now", totalFiles: 1 });
+      emitBatchEvent?.({
+        type: "FileQueued",
+        batchId: "batch-1",
+        file: fileView({
+          fileJobId: "file-confirm-candidate",
+          fileName: "confirm.pdf",
+          sourcePath: "/input/confirm.pdf",
+          status: "outputCreated",
+          recognizedTitle: "候选标题 1",
+          confidence: 90,
+          outputPath: "/input/Rustitler 输出/候选标题 1.pdf",
+        }),
+      });
+      emitBatchEvent?.({
+        type: "FileScored",
+        batchId: "batch-1",
+        fileJobId: "file-confirm-candidate",
+        result: scoringResult({
+          finalTitle: "候选标题 1",
+          confidence: 90,
+          candidates: [
+            {
+              text: "候选标题 1",
+              source: "pdfLayout",
+              pageIndex: 0,
+              score: 90,
+              categoryScores: {
+                layout: 30,
+                position: 20,
+                keyword: 15,
+                textQuality: 20,
+                penalty: 0,
+              },
+              ruleDetails: [],
+            },
+            {
+              text: "候选标题 2",
+              source: "pdfLayout",
+              pageIndex: 0,
+              score: 76,
+              categoryScores: {
+                layout: 24,
+                position: 18,
+                keyword: 14,
+                textQuality: 20,
+                penalty: 0,
+              },
+              ruleDetails: [],
+            },
+          ],
+        }),
+      });
+    });
+
+    const detailPanel = screen.getByRole("heading", { name: "详情" }).closest("aside");
+    expect(detailPanel).not.toBeNull();
+    const candidateList = within(detailPanel!).getByRole("list", { name: "候选标题列表" });
+
+    fireEvent.click(within(candidateList).getByRole("button", { name: "候选标题 2" }));
+
+    expect(mocks.selectCandidateTitle).not.toHaveBeenCalled();
+    expect(within(candidateList).getByRole("button", { name: "候选标题 2" })).toHaveClass("active");
+
+    await act(async () => {
+      fireEvent.click(within(detailPanel!).getByRole("button", { name: "确认使用该标题" }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(mocks.selectCandidateTitle).toHaveBeenCalledWith("file-confirm-candidate", "候选标题 2"),
+    );
+  });
+
+  it("renders long candidate titles with a multiline text element", async () => {
+    let emitBatchEvent: ((event: unknown) => void) | undefined;
+    mocks.subscribeBatchEvents.mockImplementation(async (handler) => {
+      emitBatchEvent = handler;
+      return () => undefined;
+    });
+    await renderApp();
+
+    const longTitle = "关于统筹推进自然保护地和生态保护红线生态环境监管有关事项的通知";
+    await waitFor(() => expect(emitBatchEvent).toBeDefined());
+    await waitForQueueReady();
+    act(() => {
+      emitBatchEvent?.({ type: "BatchStarted", batchId: "batch-1", createdAt: "now", totalFiles: 1 });
+      emitBatchEvent?.({
+        type: "FileQueued",
+        batchId: "batch-1",
+        file: fileView({
+          fileJobId: "file-long-title",
+          fileName: "long.pdf",
+          sourcePath: "/input/long.pdf",
+          status: "outputCreated",
+          recognizedTitle: longTitle,
+          confidence: 92,
+          outputPath: `/input/Rustitler 输出/${longTitle}.pdf`,
+        }),
+      });
+      emitBatchEvent?.({
+        type: "FileScored",
+        batchId: "batch-1",
+        fileJobId: "file-long-title",
+        result: scoringResult({
+          finalTitle: longTitle,
+          confidence: 92,
+          candidates: [
+            {
+              text: longTitle,
+              source: "pdfLayout",
+              pageIndex: 0,
+              score: 92,
+              categoryScores: {
+                layout: 30,
+                position: 20,
+                keyword: 15,
+                textQuality: 20,
+                penalty: 0,
+              },
+              ruleDetails: [],
+            },
+          ],
+        }),
+      });
+    });
+
+    const detailPanel = screen.getByRole("heading", { name: "详情" }).closest("aside");
+    expect(detailPanel).not.toBeNull();
+    const candidateButton = within(detailPanel!).getByRole("button", { name: longTitle });
+    expect(within(candidateButton).getByText(longTitle)).toHaveClass("candidate-title-text");
+    expect(within(detailPanel!).getAllByText(longTitle).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps file details concise with address, final title, duplicate notice, and candidate titles", async () => {
     let emitBatchEvent: ((event: unknown) => void) | undefined;
     mocks.subscribeBatchEvents.mockImplementation(async (handler) => {
       emitBatchEvent = handler;
@@ -379,7 +685,7 @@ describe("App", () => {
           fileName: "details.pdf",
           sourcePath: "/input/details.pdf",
           status: "queued",
-          duplicateWarning: "疑似重复：旧文件。",
+          duplicateWarning: "疑似重复：历史批次 batch-old 的文件 file-old 已输出到 /output/旧文件.pdf。",
         }),
       });
       emitBatchEvent?.({
@@ -389,7 +695,36 @@ describe("App", () => {
         result: scoringResult({
           finalTitle: "精简详情标题",
           confidence: 88,
+          candidates: [
+            {
+              text: "精简详情标题",
+              source: "pdfLayout",
+              pageIndex: 0,
+              score: 88,
+              categoryScores: {
+                layout: 30,
+                position: 20,
+                keyword: 15,
+                textQuality: 20,
+                penalty: 0,
+              },
+              ruleDetails: [],
+            },
+          ],
         }),
+      });
+      emitBatchEvent?.({
+        type: "FileExtracted",
+        batchId: "batch-1",
+        fileJobId: "file-details",
+        extractMethod: "pdfNativeLiteparse",
+      });
+      emitBatchEvent?.({
+        type: "FileProgress",
+        batchId: "batch-1",
+        fileJobId: "file-details",
+        stage: "score",
+        progress: 0.62,
       });
       emitBatchEvent?.({
         type: "FileOutputCreated",
@@ -400,105 +735,31 @@ describe("App", () => {
     });
 
     const detailPanel = screen.getByRole("heading", { name: "详情" }).closest("aside");
-    const candidatesSection = screen.getByRole("heading", { name: "候选标题" }).closest("section");
 
     expect(detailPanel).not.toBeNull();
+    expect(within(detailPanel!).getByText("文件地址")).toBeInTheDocument();
     expect(within(detailPanel!).getByText("/input/details.pdf")).toBeInTheDocument();
     expect(within(detailPanel!).getByText("最终标题")).toBeInTheDocument();
-    expect(within(detailPanel!).getByText("精简详情标题")).toBeInTheDocument();
-    expect(within(detailPanel!).getByText("置信度")).toBeInTheDocument();
-    expect(within(detailPanel!).getByText("88%")).toBeInTheDocument();
-    expect(within(detailPanel!).queryByText("输出路径")).not.toBeInTheDocument();
-    expect(within(detailPanel!).queryByText("失败原因")).not.toBeInTheDocument();
-    expect(within(detailPanel!).queryByText("重复提示")).not.toBeInTheDocument();
-    expect(within(detailPanel!).queryByText("处理日志")).not.toBeInTheDocument();
-
-    expect(candidatesSection).not.toBeNull();
-    expect(Array.from(candidatesSection!.querySelectorAll("details")).every((detail) => !detail.open)).toBe(true);
-  });
-
-  it("selects a visible candidate title for output", async () => {
-    let emitBatchEvent: ((event: unknown) => void) | undefined;
-    mocks.subscribeBatchEvents.mockImplementation(async (handler) => {
-      emitBatchEvent = handler;
-      return () => undefined;
-    });
-    mocks.selectCandidateTitle.mockResolvedValue(
-      fileView({
-        fileJobId: "file-select",
-        fileName: "select.pdf",
-        sourcePath: "/input/select.pdf",
-        status: "outputCreated",
-        recognizedTitle: "第二候选标题",
-        confidence: 76,
-        outputPath: "/input/Rustitler 输出/第二候选标题.pdf",
+    expect(within(detailPanel!).getAllByText("精简详情标题")).toHaveLength(2);
+    expect(within(detailPanel!).getByText("疑似重复")).toBeInTheDocument();
+    expect(within(detailPanel!).getByText("可能已处理过，请核对历史输出。")).toBeInTheDocument();
+    expect(within(detailPanel!).getByRole("heading", { name: "候选标题" })).toBeInTheDocument();
+    expect(
+      within(within(detailPanel!).getByRole("list", { name: "候选标题列表" })).getByRole("button", {
+        name: "精简详情标题",
       }),
-    );
-    await renderApp();
-
-    await waitFor(() => expect(emitBatchEvent).toBeDefined());
-    act(() => {
-      emitBatchEvent?.({ type: "BatchStarted", batchId: "batch-1", createdAt: "now", totalFiles: 1 });
-      emitBatchEvent?.({
-        type: "FileQueued",
-        batchId: "batch-1",
-        file: fileView({
-          fileJobId: "file-select",
-          fileName: "select.pdf",
-          sourcePath: "/input/select.pdf",
-          status: "queued",
-        }),
-      });
-      emitBatchEvent?.({
-        type: "FileScored",
-        batchId: "batch-1",
-        fileJobId: "file-select",
-        result: scoringResult({
-          finalTitle: "第一候选标题",
-          confidence: 90,
-          candidates: [
-            {
-              text: "第一候选标题",
-              source: "pdfLayout",
-              pageIndex: 0,
-              score: 90,
-              categoryScores: {
-                layout: 30,
-                position: 20,
-                keyword: 20,
-                textQuality: 20,
-                penalty: 0,
-              },
-              ruleDetails: [],
-            },
-            {
-              text: "第二候选标题",
-              source: "pdfLayout",
-              pageIndex: 0,
-              score: 76,
-              categoryScores: {
-                layout: 25,
-                position: 18,
-                keyword: 15,
-                textQuality: 18,
-                penalty: 0,
-              },
-              ruleDetails: [],
-            },
-          ],
-        }),
-      });
-    });
-
-    const candidatesSection = screen.getByRole("heading", { name: "候选标题" }).closest("section");
-    const detailPanel = screen.getByRole("heading", { name: "详情" }).closest("aside");
-    expect(candidatesSection).not.toBeNull();
-    expect(detailPanel).not.toBeNull();
-    const useButtons = within(candidatesSection!).getAllByRole("button", { name: "使用" });
-    fireEvent.click(useButtons[1]);
-
-    await waitFor(() => expect(mocks.selectCandidateTitle).toHaveBeenCalledWith("file-select", "第二候选标题"));
-    expect(within(detailPanel!).getByText("最终标题").nextElementSibling).toHaveTextContent("第二候选标题");
-    expect(within(detailPanel!).getByText("置信度").nextElementSibling).toHaveTextContent("76%");
+    ).toBeInTheDocument();
+    expect(within(detailPanel!).queryByText(/batch-old/)).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText(/file-old/)).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText(/旧文件\.pdf/)).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText("置信度")).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText("88%")).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText("输出路径")).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText("/input/Rustitler 输出/精简详情标题.pdf")).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText("提取方式")).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText("PDF 原生文本")).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText("当前阶段")).not.toBeInTheDocument();
+    expect(within(detailPanel!).queryByText("评分 / 62%")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "处理信息" })).not.toBeInTheDocument();
   });
 });
