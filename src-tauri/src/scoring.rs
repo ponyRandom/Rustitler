@@ -49,13 +49,86 @@ fn collect_candidates(
         return candidates;
     }
 
-    extracted
+    collect_word_candidates(extracted, profile)
+}
+
+fn collect_word_candidates(
+    extracted: &ExtractedDocument,
+    profile: &ScoringProfile,
+) -> Vec<CandidateTitle> {
+    let paragraphs = extracted
         .paragraphs
         .iter()
         .filter(|paragraph| !clean_candidate_text(&paragraph.text).is_empty())
         .take(10)
+        .collect::<Vec<_>>();
+
+    let mut candidates = paragraphs
+        .iter()
         .filter_map(|paragraph| score_paragraph(paragraph, profile))
+        .collect::<Vec<_>>();
+    candidates.extend(score_two_paragraph_title_candidates(&paragraphs, profile));
+    candidates
+}
+
+fn score_two_paragraph_title_candidates(
+    paragraphs: &[&ParagraphBlock],
+    profile: &ScoringProfile,
+) -> Vec<CandidateTitle> {
+    paragraphs
+        .windows(2)
+        .filter_map(|pair| {
+            build_two_paragraph_title(pair[0], pair[1]).and_then(|combined| {
+                let mut candidate = score_paragraph(&combined, profile)?;
+                candidate.rule_details.push(RuleDetail {
+                    rule_name: "word-two-paragraph-title".into(),
+                    category: "textQuality".into(),
+                    delta: 12,
+                    description: "相邻 Word 段落合并为标题候选".into(),
+                });
+                candidate.category_scores.text_quality += 12;
+                candidate.score = candidate.score.saturating_add(12).min(100);
+                Some(candidate)
+            })
+        })
         .collect()
+}
+
+fn build_two_paragraph_title(
+    first: &ParagraphBlock,
+    second: &ParagraphBlock,
+) -> Option<ParagraphBlock> {
+    let first_text = clean_candidate_text(&first.text);
+    let second_text = clean_candidate_text(&second.text);
+    if first_text.is_empty()
+        || second_text.is_empty()
+        || is_symbol_only_noise(&first_text)
+        || is_symbol_only_noise(&second_text)
+        || looks_like_noise(&first_text)
+        || looks_like_noise(&second_text)
+        || looks_like_word_body_continuation(&first_text)
+    {
+        return None;
+    }
+
+    let combined_text = format!(
+        "{}{}",
+        first_text.split_whitespace().collect::<String>(),
+        second_text.split_whitespace().collect::<String>()
+    );
+    let combined_char_count = combined_text.chars().count();
+    if !(6..=60).contains(&combined_char_count)
+        || looks_like_sentence(&combined_text)
+        || looks_like_promulgation_sentence(&combined_text)
+        || !looks_like_word_title_continuation(&second_text)
+    {
+        return None;
+    }
+
+    Some(ParagraphBlock {
+        text: combined_text,
+        paragraph_index: first.paragraph_index,
+    })
 }
 
 fn score_two_line_title_candidates(
@@ -689,6 +762,42 @@ fn looks_like_notice_title_topic(text: &str) -> bool {
     contains_notice_word && contains_topic_word
 }
 
+fn looks_like_word_title_continuation(text: &str) -> bool {
+    let compact = text.split_whitespace().collect::<String>();
+    let char_count = compact.chars().count();
+    if !(4..=32).contains(&char_count) || looks_like_word_body_continuation(&compact) {
+        return false;
+    }
+
+    let title_keywords = [
+        "通知", "报告", "方案", "制度", "合同", "函", "请示", "意见", "办法", "规定", "条例",
+        "决定", "公告", "通告", "结果", "情况", "事项", "工作", "说明", "申请", "名单",
+    ];
+    if title_keywords
+        .iter()
+        .any(|keyword| compact.contains(keyword))
+    {
+        return true;
+    }
+
+    let period_like =
+        Regex::new(r"^(\d{4}年)?第?[一二三四五六七八九十\d]+次[（(]?[一二三四五六七八九十\d]+[—\-至到][一二三四五六七八九十\d]+月[）)]?$")
+            .unwrap();
+    period_like.is_match(&compact)
+}
+
+fn looks_like_word_body_continuation(text: &str) -> bool {
+    let body_starts = [
+        "正文", "各单位", "各部门", "根据", "按照", "为进一步", "现将", "请各", "附件", "联系人",
+    ];
+
+    body_starts.iter().any(|prefix| text.starts_with(prefix))
+        || text.contains("正文段落")
+        || text.contains("段落内容")
+        || looks_like_sentence(text)
+        || Regex::new(r"^[一二三四五六七八九十]+[、.．]").unwrap().is_match(text)
+}
+
 fn is_punctuation(ch: char) -> bool {
     matches!(
         ch,
@@ -1077,6 +1186,48 @@ mod tests {
             .rule_details
             .iter()
             .any(|rule| rule.rule_name == "word-conservatism"));
+    }
+
+    #[test]
+    fn combines_adjacent_word_paragraphs_into_one_title_candidate() {
+        let result = score_document(
+            ExtractedDocument {
+                source_type: FileType::Doc,
+                extract_method: ExtractMethod::DocConvertedUndoc,
+                pages: vec![],
+                paragraphs: vec![
+                    ParagraphBlock {
+                        text: "生态处关于报送2026年第一次（1—2月）".into(),
+                        paragraph_index: 0,
+                    },
+                    ParagraphBlock {
+                        text: "双月遥感监测线索核查结果的请示".into(),
+                        paragraph_index: 1,
+                    },
+                    ParagraphBlock {
+                        text: "自然保护地内违法违规点位情况".into(),
+                        paragraph_index: 2,
+                    },
+                ],
+                diagnostics_ref: None,
+            },
+            ScoringProfile::default(),
+        );
+
+        assert_eq!(
+            result.final_title.as_deref(),
+            Some("生态处关于报送2026年第一次（1—2月）双月遥感监测线索核查结果的请示")
+        );
+        assert_eq!(
+            result.candidates[0].text,
+            "生态处关于报送2026年第一次（1—2月）双月遥感监测线索核查结果的请示"
+        );
+        assert_eq!(result.candidates[0].source, CandidateSource::WordParagraph);
+        assert_eq!(result.candidates[0].paragraph_index, Some(0));
+        assert!(result.candidates[0]
+            .rule_details
+            .iter()
+            .any(|rule| rule.rule_name == "word-two-paragraph-title"));
     }
 
     #[test]
