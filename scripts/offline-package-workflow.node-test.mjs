@@ -28,6 +28,7 @@ test("package jobs build both LibreOffice variants", () => {
   assert.match(workflow, /variant: with-libreoffice/);
   assert.match(workflow, /Install LibreOffice runtime/);
   assert.match(workflow, /Prepare bundled LibreOffice runtime/);
+  assert.match(workflow, /pdfiumPresent/);
   assert.match(workflow, /sofficePresent/);
   assert.match(workflow, /Release assets include four installers/);
 });

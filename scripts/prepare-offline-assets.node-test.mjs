@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
 import path from "node:path";
 import {
+  destinationPdfiumPath,
   destinationTessdataPath,
   findChiSimSource,
+  findPdfiumSource,
+  platformPdfiumAssetStem,
+  platformPdfiumCandidates,
+  platformPdfiumLibraryName,
   platformTessdataCandidates,
 } from "./prepare-offline-assets.mjs";
 
@@ -65,4 +71,78 @@ test("platformTessdataCandidates covers Windows APPDATA fallback", () => {
       ),
     ],
   );
+});
+
+test("destinationPdfiumPath points at Tauri pdfium resources", () => {
+  const root = path.resolve("/repo");
+
+  assert.equal(
+    destinationPdfiumPath({ projectRoot: root, platform: "win32" }),
+    path.join(root, "src-tauri", "resources", "pdfium", "pdfium.dll"),
+  );
+  assert.equal(
+    destinationPdfiumPath({ projectRoot: root, platform: "darwin" }),
+    path.join(root, "src-tauri", "resources", "pdfium", "libpdfium.dylib"),
+  );
+});
+
+test("platformPdfiumAssetStem maps Windows and macOS release artifacts", () => {
+  assert.equal(
+    platformPdfiumAssetStem({ platform: "win32", arch: "x64" }),
+    "pdfium-win-x64",
+  );
+  assert.equal(
+    platformPdfiumAssetStem({ platform: "darwin", arch: "arm64" }),
+    "pdfium-mac-arm64",
+  );
+  assert.equal(platformPdfiumLibraryName("win32"), "pdfium.dll");
+});
+
+test("findPdfiumSource checks explicit directories and Windows cache fallback", () => {
+  const explicit = path.join("C:\\PDFium", "bin", "pdfium.dll");
+  const cache = path.join(
+    "C:\\Users\\runner\\AppData\\Local",
+    "pdfium-rs",
+    "chromium_7897",
+    "pdfium-win-x64",
+    "bin",
+    "pdfium.dll",
+  );
+  const existing = new Set(["C:\\PDFium", explicit, cache]);
+
+  assert.equal(
+    findPdfiumSource({
+      explicitSource: "C:\\PDFium",
+      platform: "win32",
+      exists: (candidate) => existing.has(candidate),
+      stat: () => ({ isFile: () => false, isDirectory: () => true }),
+    }),
+    explicit,
+  );
+  assert.equal(
+    platformPdfiumCandidates({
+      env: { LOCALAPPDATA: "C:\\Users\\runner\\AppData\\Local" },
+      platform: "win32",
+      arch: "x64",
+    }).at(-2),
+    cache,
+  );
+  assert.equal(
+    findPdfiumSource({
+      env: { LOCALAPPDATA: "C:\\Users\\runner\\AppData\\Local" },
+      platform: "win32",
+      arch: "x64",
+      exists: (candidate) => existing.has(candidate),
+    }),
+    cache,
+  );
+});
+
+test("offline asset preparation handles the PDFium runtime library", () => {
+  const script = fs.readFileSync("scripts/prepare-offline-assets.mjs", "utf8");
+
+  assert.match(script, /PDFIUM_RELEASE_TAG/);
+  assert.match(script, /resources["']?,\s*["']pdfium/);
+  assert.match(script, /pdfium-win-x64/);
+  assert.match(script, /pdfium\.dll/);
 });

@@ -44,6 +44,7 @@ impl AppState {
     }
 
     pub fn with_runtime_assets(mut self, runtime_assets: RuntimeAssets) -> Self {
+        crate::packaging::configure_pdfium_runtime(Some(&runtime_assets));
         self.runtime_assets = Some(runtime_assets);
         self
     }

@@ -9,6 +9,8 @@ target/
 
 # Local offline packaging assets
 src-tauri/resources/libreoffice/LibreOffice.app/
+src-tauri/resources/pdfium/*
+!src-tauri/resources/pdfium/.gitkeep
 
 *.log
 *.tmp

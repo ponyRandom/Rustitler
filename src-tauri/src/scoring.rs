@@ -279,7 +279,7 @@ fn two_lines_have_title_geometry(first: &LayoutBlock, second: &LayoutBlock) -> b
     let centered_together = (first_x_mid - 0.5).abs() <= 0.16 && (second_x_mid - 0.5).abs() <= 0.16;
     let aligned_left = (first.bbox.x0 - second.bbox.x0).abs() <= 0.08;
     let aligned_right = (first.bbox.x1 - second.bbox.x1).abs() <= 0.08;
-    if !centered_together && !(aligned_left || aligned_right) {
+    if !(centered_together || aligned_left || aligned_right) {
         return false;
     }
 

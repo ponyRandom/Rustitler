@@ -1,7 +1,10 @@
 use crate::errors::AppError;
 #[cfg(feature = "extraction-ocr")]
 use crate::extract::{self, OcrExtractor};
-use crate::packaging::{resolve_soffice_path_for, resolve_tessdata_dir_for, RuntimeAssets};
+use crate::packaging::{
+    configure_pdfium_runtime, resolve_pdfium_path, resolve_soffice_path_for,
+    resolve_tessdata_dir_for, RuntimeAssets,
+};
 use crate::{history, settings};
 use serde::Serialize;
 use std::ffi::OsString;
@@ -107,6 +110,7 @@ pub enum SmokeCheckStatus {
 #[serde(rename_all = "camelCase")]
 pub struct SmokeChecks {
     pub tessdata_present: bool,
+    pub pdfium_present: bool,
     pub soffice_present: bool,
     pub settings_roundtrip: bool,
     pub history_database: bool,
@@ -127,6 +131,8 @@ pub struct SmokeTestReport {
 pub struct ResourceProbe {
     pub tessdata_dir: PathBuf,
     pub chi_sim_traineddata_present: bool,
+    pub pdfium_path: PathBuf,
+    pub pdfium_present: bool,
     pub soffice_path: PathBuf,
     pub soffice_present: bool,
 }
@@ -167,6 +173,7 @@ pub fn run_from_env() -> Result<bool, AppError> {
 
 pub fn run_smoke_test(config: &SmokeTestConfig) -> Result<SmokeTestReport, AppError> {
     let assets = RuntimeAssets::new(&config.resource_dir);
+    configure_pdfium_runtime(Some(&assets));
     let resources = probe_resources(&assets);
     fs::create_dir_all(&config.app_data_dir).map_err(|err| {
         AppError::internal(format!(
@@ -182,6 +189,7 @@ pub fn run_smoke_test(config: &SmokeTestConfig) -> Result<SmokeTestReport, AppEr
     let image_ocr = run_image_ocr_check(&assets, config.require_ocr)?;
 
     let status = if resources.chi_sim_traineddata_present
+        && resources.pdfium_present
         && settings_roundtrip
         && history_database
         && (!config.require_ocr || image_ocr == SmokeCheckStatus::Passed)
@@ -198,6 +206,7 @@ pub fn run_smoke_test(config: &SmokeTestConfig) -> Result<SmokeTestReport, AppEr
         app_data_dir: config.app_data_dir.clone(),
         checks: SmokeChecks {
             tessdata_present: resources.chi_sim_traineddata_present,
+            pdfium_present: resources.pdfium_present,
             soffice_present: resources.soffice_present,
             settings_roundtrip,
             history_database,
@@ -208,10 +217,13 @@ pub fn run_smoke_test(config: &SmokeTestConfig) -> Result<SmokeTestReport, AppEr
 
 pub fn probe_resources(assets: &RuntimeAssets) -> ResourceProbe {
     let tessdata_dir = resolve_tessdata_dir_for(None, None, Some(assets));
+    let pdfium_path = resolve_pdfium_path(Some(assets));
     let soffice_path = resolve_soffice_path_for(None, Some(assets), &[]);
     ResourceProbe {
         chi_sim_traineddata_present: tessdata_dir.join("chi_sim.traineddata").is_file(),
         tessdata_dir,
+        pdfium_present: pdfium_path.is_file(),
+        pdfium_path,
         soffice_present: soffice_path.is_file(),
         soffice_path,
     }
@@ -355,18 +367,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let resource_dir = dir.path().join("resources");
         let tessdata_dir = resource_dir.join("tessdata");
+        let pdfium_path = resource_dir
+            .join("pdfium")
+            .join(crate::packaging::platform_pdfium_library_name());
         let soffice_path = resource_dir
             .join("libreoffice")
             .join(crate::packaging::platform_soffice_relative_path());
         fs::create_dir_all(&tessdata_dir).unwrap();
+        fs::create_dir_all(pdfium_path.parent().unwrap()).unwrap();
         fs::create_dir_all(soffice_path.parent().unwrap()).unwrap();
         fs::write(tessdata_dir.join("chi_sim.traineddata"), b"traineddata").unwrap();
+        fs::write(&pdfium_path, b"pdfium").unwrap();
         fs::write(&soffice_path, b"soffice").unwrap();
 
         let resources = probe_resources(&RuntimeAssets::new(&resource_dir));
 
         assert_eq!(resources.tessdata_dir, tessdata_dir);
         assert!(resources.chi_sim_traineddata_present);
+        assert_eq!(resources.pdfium_path, pdfium_path);
+        assert!(resources.pdfium_present);
         assert_eq!(resources.soffice_path, soffice_path);
         assert!(resources.soffice_present);
     }
@@ -380,6 +399,7 @@ mod tests {
             app_data_dir: PathBuf::from("/data"),
             checks: SmokeChecks {
                 tessdata_present: true,
+                pdfium_present: true,
                 soffice_present: false,
                 settings_roundtrip: true,
                 history_database: true,
@@ -391,6 +411,7 @@ mod tests {
 
         assert_eq!(value["status"], "ok");
         assert_eq!(value["checks"]["tessdataPresent"], true);
+        assert_eq!(value["checks"]["pdfiumPresent"], true);
         assert_eq!(value["checks"]["sofficePresent"], false);
         assert_eq!(value["checks"]["imageOcr"], "skipped");
     }
