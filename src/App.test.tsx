@@ -346,6 +346,37 @@ describe("App", () => {
     expect(within(result).queryByRole("list", { name: "失败明细" })).not.toBeInTheDocument();
   });
 
+  it("lays out classification paths and counts for long Windows folders", async () => {
+    const rendered = await renderApp();
+    mocks.selectFolder.mockResolvedValue(["C:\\Users\\22418\\Desktop\\standards"]);
+    mocks.classifyFolder.mockResolvedValue(
+      classificationSummary({
+        sourcePath: "C:\\Users\\22418\\Desktop\\standards\\learning\\deeply\\nested\\source",
+        outputPath:
+          "C:\\Users\\22418\\Desktop\\standards\\Rustitler classification output 2026-07-03 1530",
+        categoryCounts: [
+          { category: "Request", count: 1 },
+          { category: "Report", count: 2 },
+          { category: "Notice", count: 3 },
+          { category: "Standard", count: 4 },
+          { category: "Review", count: 5 },
+          { category: "Other", count: 6 },
+        ],
+        failures: [],
+        failedFiles: 0,
+      }),
+    );
+
+    await waitForQueueReady();
+    fireEvent.click(rendered.container.querySelector(".classify-action") as HTMLElement);
+
+    await waitFor(() => expect(rendered.container.querySelector(".classification-result")).toBeInTheDocument());
+    expect(rendered.container.querySelector(".classification-path-facts")).toBeInTheDocument();
+    expect(rendered.container.querySelectorAll(".classification-path-fact")).toHaveLength(2);
+    expect(rendered.container.querySelector(".classification-stat-facts")).toBeInTheDocument();
+    expect(rendered.container.querySelector(".category-counts-scroller")).toBeInTheDocument();
+  });
+
   it("shows classification failure details when individual files fail", async () => {
     mocks.selectFolder.mockResolvedValue(["/input/classify-source"]);
     mocks.classifyFolder.mockResolvedValue(classificationSummary());

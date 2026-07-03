@@ -395,15 +395,19 @@ function ClassificationResult({ summary }: { summary: ClassificationSummary }) {
         </div>
       </div>
 
-      <dl className="facts classification-facts">
-        <div>
+      <div className="classification-facts">
+        <dl className="facts classification-path-facts">
+        <div className="classification-path-fact">
           <dt>源文件夹</dt>
           <dd title={summary.sourcePath}>{summary.sourcePath}</dd>
         </div>
-        <div>
+        <div className="classification-path-fact">
           <dt>输出文件夹</dt>
           <dd title={summary.outputPath}>{summary.outputPath}</dd>
         </div>
+        </dl>
+
+        <dl className="facts classification-stat-facts">
         <div>
           <dt>总文件数</dt>
           <dd>{summary.totalFiles}</dd>
@@ -416,15 +420,18 @@ function ClassificationResult({ summary }: { summary: ClassificationSummary }) {
           <dt>失败文件</dt>
           <dd>{summary.failedFiles} 个</dd>
         </div>
-      </dl>
+        </dl>
+      </div>
 
-      <div className="category-counts" role="list" aria-label="分类计数">
-        {summary.categoryCounts.map((item) => (
-          <div role="listitem" key={item.category}>
-            <span>{item.category}</span>
-            <strong>{item.count}</strong>
-          </div>
-        ))}
+      <div className="category-counts-scroller">
+        <div className="category-counts" role="list" aria-label="分类计数">
+          {summary.categoryCounts.map((item) => (
+            <div role="listitem" key={item.category}>
+              <span>{item.category}</span>
+              <strong>{item.count}</strong>
+            </div>
+          ))}
+        </div>
       </div>
 
       {summary.failures.length > 0 ? (
