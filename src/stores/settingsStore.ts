@@ -5,7 +5,7 @@ import {
   resetSettings,
   saveSettings,
 } from "../api/commands";
-import type { KeywordRule, RegexRule, Settings } from "../types/ipc";
+import type { ClassificationCategory, KeywordRule, RegexRule, Settings } from "../types/ipc";
 import { createObservable, type ObservableStore } from "./observable";
 
 export interface SettingsStoreState {
@@ -26,6 +26,12 @@ export interface SettingsStore extends ObservableStore<SettingsStoreState> {
   addRegexRule: () => void;
   updateRegexRule: (index: number, patch: Partial<RegexRule>) => void;
   removeRegexRule: (index: number) => void;
+  addClassificationCategory: () => void;
+  updateClassificationCategory: (index: number, patch: Partial<ClassificationCategory>) => void;
+  updateClassificationKeyword: (categoryIndex: number, keywordIndex: number, keyword: string) => void;
+  addClassificationKeyword: (categoryIndex: number) => void;
+  removeClassificationKeyword: (categoryIndex: number, keywordIndex: number) => void;
+  removeClassificationCategory: (index: number) => void;
   save: () => Promise<Settings>;
   importFrom: (path: string) => Promise<Settings>;
   exportTo: (path: string) => Promise<void>;
@@ -130,6 +136,88 @@ export const createSettingsStore = (): SettingsStore => {
     updateDraft({ regexRules: draft.regexRules.filter((_, currentIndex) => currentIndex !== index) });
   };
 
+  const addClassificationCategory = () => {
+    const draft = requireDraft();
+    updateDraft({
+      classificationSettings: {
+        ...draft.classificationSettings,
+        categories: [...draft.classificationSettings.categories, { name: "", keywords: [""] }],
+      },
+    });
+  };
+
+  const updateClassificationCategory = (index: number, patch: Partial<ClassificationCategory>) => {
+    const draft = requireDraft();
+    updateDraft({
+      classificationSettings: {
+        ...draft.classificationSettings,
+        categories: draft.classificationSettings.categories.map((category, currentIndex) =>
+          currentIndex === index ? { ...category, ...patch } : category,
+        ),
+      },
+    });
+  };
+
+  const updateClassificationKeyword = (categoryIndex: number, keywordIndex: number, keyword: string) => {
+    const draft = requireDraft();
+    updateDraft({
+      classificationSettings: {
+        ...draft.classificationSettings,
+        categories: draft.classificationSettings.categories.map((category, currentCategoryIndex) =>
+          currentCategoryIndex === categoryIndex
+            ? {
+                ...category,
+                keywords: category.keywords.map((currentKeyword, currentKeywordIndex) =>
+                  currentKeywordIndex === keywordIndex ? keyword : currentKeyword,
+                ),
+              }
+            : category,
+        ),
+      },
+    });
+  };
+
+  const addClassificationKeyword = (categoryIndex: number) => {
+    const draft = requireDraft();
+    updateDraft({
+      classificationSettings: {
+        ...draft.classificationSettings,
+        categories: draft.classificationSettings.categories.map((category, currentIndex) =>
+          currentIndex === categoryIndex
+            ? { ...category, keywords: [...category.keywords, ""] }
+            : category,
+        ),
+      },
+    });
+  };
+
+  const removeClassificationKeyword = (categoryIndex: number, keywordIndex: number) => {
+    const draft = requireDraft();
+    updateDraft({
+      classificationSettings: {
+        ...draft.classificationSettings,
+        categories: draft.classificationSettings.categories.map((category, currentCategoryIndex) =>
+          currentCategoryIndex === categoryIndex
+            ? {
+                ...category,
+                keywords: category.keywords.filter((_, currentKeywordIndex) => currentKeywordIndex !== keywordIndex),
+              }
+            : category,
+        ),
+      },
+    });
+  };
+
+  const removeClassificationCategory = (index: number) => {
+    const draft = requireDraft();
+    updateDraft({
+      classificationSettings: {
+        ...draft.classificationSettings,
+        categories: draft.classificationSettings.categories.filter((_, currentIndex) => currentIndex !== index),
+      },
+    });
+  };
+
   const save = async () => {
     const draft = requireDraft();
     observable.updateState((state) => ({ ...state, saving: true, error: undefined }));
@@ -175,6 +263,12 @@ export const createSettingsStore = (): SettingsStore => {
     addRegexRule,
     updateRegexRule,
     removeRegexRule,
+    addClassificationCategory,
+    updateClassificationCategory,
+    updateClassificationKeyword,
+    addClassificationKeyword,
+    removeClassificationKeyword,
+    removeClassificationCategory,
     save,
     importFrom,
     exportTo,

@@ -29,6 +29,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             rustitler_lib::commands::start_batch,
+            rustitler_lib::commands::classify_folder,
             rustitler_lib::commands::cancel_batch,
             rustitler_lib::commands::get_batch_state,
             rustitler_lib::commands::confirm_pending_output,

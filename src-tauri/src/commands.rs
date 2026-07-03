@@ -9,8 +9,9 @@ use crate::extract::{self, ExtractionServices, SofficeDocConverter};
 use crate::extract::{OcrExtractor, OcrPage, OcrPageInput};
 use crate::history::{self, FileResultRecord, OutputKind};
 use crate::models::{
-    BatchEvent, BatchId, BatchState, ExtractedDocument, FileJobId, FileJobView, FileStatus,
-    HistoryBatchDetail, HistoryBatchPage, Settings, UndoResult,
+    BatchEvent, BatchId, BatchState, ClassificationSettings, ClassificationSummary,
+    ExtractedDocument, FileJobId, FileJobView, FileStatus, HistoryBatchDetail, HistoryBatchPage,
+    Settings, UndoResult,
 };
 use crate::packaging::RuntimeAssets;
 use crate::{rename, settings};
@@ -238,6 +239,28 @@ pub fn start_batch_impl(
             .start_batch_with_services(input_paths, settings_snapshot, &services)?;
 
     Ok(result.batch_id)
+}
+
+#[tauri::command]
+pub fn classify_folder(
+    source_path: String,
+    classification_settings: ClassificationSettings,
+) -> Result<ClassificationSummary, AppError> {
+    classify_folder_impl(source_path, classification_settings)
+}
+
+pub fn classify_folder_impl(
+    source_path: String,
+    classification_settings: ClassificationSettings,
+) -> Result<ClassificationSummary, AppError> {
+    if source_path.trim().is_empty() {
+        return Err(command_error(
+            "source_path must not be empty",
+            ProcessingStage::Ingest,
+        ));
+    }
+
+    crate::classify::classify_folder(source_path, &classification_settings)
 }
 
 #[tauri::command]
@@ -523,8 +546,11 @@ pub fn import_settings(
     import_settings_impl(&state, path)
 }
 
-pub fn import_settings_impl(_state: &AppState, path: String) -> Result<Settings, AppError> {
-    settings::import_settings(path)
+pub fn import_settings_impl(state: &AppState, path: String) -> Result<Settings, AppError> {
+    let mut imported = settings::import_settings(path)?;
+    let current = settings::load_settings(&state.app_data_dir)?;
+    imported.classification_settings = current.classification_settings;
+    Ok(imported)
 }
 
 #[tauri::command]
@@ -564,8 +590,9 @@ mod tests {
     use crate::errors::{ErrorCategory, ErrorCode};
     use crate::history::{BatchRecord, FileResultRecord};
     use crate::models::{
-        BatchStatus, BatchSummary, CandidateSource, CandidateTitle, CategoryScores, FileStatus,
-        FileType, PendingReason, ScoreDecision, ScoringResult, SourceFingerprint,
+        BatchStatus, BatchSummary, CandidateSource, CandidateTitle, CategoryScores,
+        ClassificationCategory, FileStatus, FileType, PendingReason, ScoreDecision, ScoringResult,
+        SourceFingerprint,
     };
     use crate::settings::create_settings_snapshot;
     use std::fs;
@@ -634,6 +661,58 @@ mod tests {
                 ..
             } if event_batch_id == &batch_id
         ));
+    }
+
+    #[test]
+    fn classify_folder_command_returns_summary_from_classify_module() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("alpha.pdf"), b"document").unwrap();
+
+        let summary = classify_folder_impl(
+            source.display().to_string(),
+            classification_settings("Alpha"),
+        )
+        .unwrap();
+
+        assert_eq!(summary.source_path, source.to_string_lossy());
+        assert_eq!(summary.total_files, 1);
+        assert_eq!(summary.copied_files, 1);
+        assert_eq!(summary.failed_files, 0);
+        assert!(Path::new(&summary.output_path)
+            .join("Alpha")
+            .join("alpha.pdf")
+            .is_file());
+    }
+
+    #[test]
+    fn classify_folder_command_rejects_empty_source_path_as_input_error() {
+        let error =
+            classify_folder_impl(" \t\r\n ".into(), classification_settings("Alpha")).unwrap_err();
+
+        assert_eq!(error.code, ErrorCode::InvalidCommandArgument);
+        assert_eq!(error.category, ErrorCategory::Input);
+        assert_eq!(error.file_path, None);
+    }
+
+    #[test]
+    fn classify_folder_command_preserves_classify_module_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("missing-source");
+
+        let error = classify_folder_impl(
+            missing.display().to_string(),
+            classification_settings("Alpha"),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, ErrorCode::InvalidCommandArgument);
+        assert_eq!(error.category, ErrorCategory::Input);
+        assert_eq!(
+            error.file_path.as_deref(),
+            Some(missing.to_string_lossy().as_ref())
+        );
     }
 
     #[test]
@@ -805,6 +884,51 @@ mod tests {
     }
 
     #[test]
+    fn import_settings_command_preserves_local_classification_when_saved() {
+        let state = test_state();
+        let imported_path = state.app_data_dir.join("import-scoring-only.json");
+        let local_classification = ClassificationSettings {
+            categories: vec![ClassificationCategory {
+                name: "Local Category".into(),
+                keywords: vec!["local".into()],
+                system_kind: None,
+            }],
+        };
+        let local_settings = Settings {
+            auto_output_threshold: 72,
+            classification_settings: local_classification.clone(),
+            ..Settings::default()
+        };
+        save_settings_impl(&state, local_settings).unwrap();
+        fs::write(
+            &imported_path,
+            r#"{
+              "version": 1,
+              "autoOutputThreshold": 61,
+              "layoutSensitivity": 1.0,
+              "positionSensitivity": 1.0,
+              "keywordSensitivity": 1.0,
+              "textQualitySensitivity": 1.0,
+              "ocrConservatism": 1.0,
+              "maxTitleChars": 45,
+              "keywordRules": [],
+              "regexRules": [],
+              "debugMode": true
+            }"#,
+        )
+        .unwrap();
+
+        let imported = import_settings_impl(&state, imported_path.display().to_string()).unwrap();
+        let saved = save_settings_impl(&state, imported).unwrap();
+        let loaded = load_settings_impl(&state).unwrap();
+
+        assert_eq!(saved.auto_output_threshold, 61);
+        assert!(saved.debug_mode);
+        assert_eq!(saved.classification_settings, local_classification);
+        assert_eq!(loaded.classification_settings, local_classification);
+    }
+
+    #[test]
     fn save_settings_returns_structured_validation_error() {
         let state = test_state();
         let invalid = Settings {
@@ -834,6 +958,16 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let app_data_dir = temp_dir.keep();
         AppState::new(app_data_dir, Arc::new(RecordingEventEmitter::default())).unwrap()
+    }
+
+    fn classification_settings(keyword: &str) -> ClassificationSettings {
+        ClassificationSettings {
+            categories: vec![ClassificationCategory {
+                name: keyword.into(),
+                keywords: vec![keyword.to_ascii_lowercase()],
+                system_kind: None,
+            }],
+        }
     }
 
     fn seed_pending_history(

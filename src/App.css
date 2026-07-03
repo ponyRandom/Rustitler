@@ -273,7 +273,7 @@ main {
 .queue-panel,
 .history-list {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   gap: 10px;
   overflow: hidden;
 }
@@ -500,6 +500,124 @@ mark[data-status="failed"] {
   color: #9b1c1c;
   background: #fde8e8;
   border-radius: 8px;
+}
+
+.classification-error {
+  display: grid;
+  gap: 4px;
+}
+
+.classification-error span,
+.classification-error small {
+  overflow-wrap: anywhere;
+}
+
+.classification-result {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe4e8;
+  border-radius: 8px;
+  background: #fbfdfd;
+  overflow: hidden;
+}
+
+.classification-facts {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.classification-path-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.classification-stat-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.classification-path-facts div,
+.classification-stat-facts div {
+  padding: 8px;
+  border: 1px solid #edf2f4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.classification-path-facts div {
+  grid-template-columns: 86px minmax(0, 1fr);
+}
+
+.classification-stat-facts div {
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.classification-path-fact dd {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.category-counts-scroller {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.category-counts {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(132px, 164px);
+  gap: 8px;
+  min-width: 100%;
+  width: max-content;
+}
+
+.category-counts div {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #edf2f4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.category-counts span,
+.classification-failures strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.classification-failures {
+  display: grid;
+  gap: 8px;
+}
+
+.classification-failures h3 {
+  font-size: 15px;
+}
+
+.classification-failures [role="list"] {
+  display: grid;
+  gap: 7px;
+}
+
+.classification-failures [role="listitem"] {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid #f2c6c6;
+  border-radius: 8px;
+  background: #fff7f7;
 }
 
 .facts {
@@ -751,9 +869,11 @@ dd {
 .settings-content {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 12px;
-  overflow: hidden;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .control-grid {
@@ -801,6 +921,70 @@ input:focus {
   align-content: start;
   gap: 7px;
   overflow: auto;
+}
+
+.classification-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, auto);
+  gap: 12px;
+  overflow: hidden;
+}
+
+.classification-editor {
+  min-height: 0;
+  max-height: min(360px, 40vh);
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+}
+
+.classification-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.55fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #dbe4e8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.classification-category-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 8px;
+  align-items: end;
+}
+
+.classification-category-fields label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.classification-category-fields span {
+  color: #627381;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.classification-keywords {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.classification-keyword-row {
+  min-width: 150px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+}
+
+.classification-keywords > button.secondary {
+  min-height: 34px;
 }
 
 .rule-row {
@@ -972,6 +1156,7 @@ dt {
 .detail-panel,
 .history-list,
 .settings-panel,
+.classification-result,
 .settings-footer {
   background: var(--surface);
   border-color: var(--border);
@@ -1213,9 +1398,20 @@ input:focus {
   }
 
   .control-grid,
+  .classification-row,
   .rule-row,
   .path-action {
     grid-template-columns: 1fr;
+  }
+
+  .classification-path-facts,
+  .classification-stat-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .category-counts {
+    grid-template-columns: none;
+    grid-auto-columns: minmax(128px, 75vw);
   }
 }
 

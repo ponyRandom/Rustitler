@@ -41,6 +41,77 @@ impl FileType {
     }
 }
 
+// Folder classification DTOs
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassificationSettings {
+    pub categories: Vec<ClassificationCategory>,
+}
+
+impl Default for ClassificationSettings {
+    fn default() -> Self {
+        Self {
+            categories: ["请示", "报告", "通知", "标准"]
+                .into_iter()
+                .map(|name| ClassificationCategory {
+                    name: name.into(),
+                    keywords: vec![name.into()],
+                    system_kind: None,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassificationCategory {
+    pub name: String,
+    pub keywords: Vec<String>,
+    pub system_kind: Option<SystemClassificationKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SystemClassificationKind {
+    Other,
+    NeedsReview,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassifyFolderRequest {
+    pub source_path: String,
+    pub settings: ClassificationSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassificationSummary {
+    pub source_path: String,
+    pub output_path: String,
+    pub total_files: usize,
+    pub copied_files: usize,
+    pub failed_files: usize,
+    pub category_counts: Vec<CategoryCount>,
+    pub failures: Vec<ClassificationFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryCount {
+    pub category: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassificationFailure {
+    pub source_path: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FileStatus {
@@ -307,6 +378,8 @@ pub struct Settings {
     pub keyword_rules: Vec<KeywordRule>,
     pub regex_rules: Vec<RegexRule>,
     pub debug_mode: bool,
+    #[serde(default)]
+    pub classification_settings: ClassificationSettings,
 }
 
 impl Default for Settings {
@@ -325,6 +398,7 @@ impl Default for Settings {
             keyword_rules: profile.keyword_rules,
             regex_rules: profile.regex_rules,
             debug_mode: false,
+            classification_settings: ClassificationSettings::default(),
         }
     }
 }
@@ -610,6 +684,128 @@ mod tests {
     }
 
     #[test]
+    fn classification_settings_serialize_with_camel_case_and_system_kind_values() {
+        let settings = ClassificationSettings {
+            categories: vec![
+                ClassificationCategory {
+                    name: "Reports".into(),
+                    keywords: vec!["report".into(), "summary".into()],
+                    system_kind: None,
+                },
+                ClassificationCategory {
+                    name: "Other".into(),
+                    keywords: vec![],
+                    system_kind: Some(SystemClassificationKind::Other),
+                },
+                ClassificationCategory {
+                    name: "Needs Review".into(),
+                    keywords: vec![],
+                    system_kind: Some(SystemClassificationKind::NeedsReview),
+                },
+            ],
+        };
+
+        let value = serde_json::to_value(&settings).unwrap();
+
+        assert_eq!(
+            value,
+            json!({
+                "categories": [
+                    {
+                        "name": "Reports",
+                        "keywords": ["report", "summary"],
+                        "systemKind": null
+                    },
+                    {
+                        "name": "Other",
+                        "keywords": [],
+                        "systemKind": "other"
+                    },
+                    {
+                        "name": "Needs Review",
+                        "keywords": [],
+                        "systemKind": "needsReview"
+                    }
+                ]
+            })
+        );
+        assert!(value["categories"][0].get("system_kind").is_none());
+
+        let back: ClassificationSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn classify_folder_request_round_trips_with_settings_snapshot() {
+        let request = ClassifyFolderRequest {
+            source_path: "/input/folder".into(),
+            settings: ClassificationSettings {
+                categories: vec![ClassificationCategory {
+                    name: "Notice".into(),
+                    keywords: vec!["notice".into()],
+                    system_kind: None,
+                }],
+            },
+        };
+
+        let value = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(value["sourcePath"], "/input/folder");
+        assert_eq!(value["settings"]["categories"][0]["name"], "Notice");
+        assert!(value.get("source_path").is_none());
+
+        let back: ClassifyFolderRequest = serde_json::from_value(value).unwrap();
+        assert_eq!(back, request);
+    }
+
+    #[test]
+    fn classification_summary_serializes_structure_and_round_trips() {
+        let summary = ClassificationSummary {
+            source_path: "/input/folder".into(),
+            output_path: "/input/Rustitler classification output 2026-07-03 1530".into(),
+            total_files: 3,
+            copied_files: 2,
+            failed_files: 1,
+            category_counts: vec![
+                CategoryCount {
+                    category: "Reports".into(),
+                    count: 2,
+                },
+                CategoryCount {
+                    category: "Other".into(),
+                    count: 0,
+                },
+            ],
+            failures: vec![ClassificationFailure {
+                source_path: "/input/folder/broken.pdf".into(),
+                reason: "copy failed".into(),
+            }],
+        };
+
+        let value = serde_json::to_value(&summary).unwrap();
+
+        assert_eq!(value["sourcePath"], "/input/folder");
+        assert_eq!(
+            value["outputPath"],
+            "/input/Rustitler classification output 2026-07-03 1530"
+        );
+        assert_eq!(value["totalFiles"], 3);
+        assert_eq!(value["copiedFiles"], 2);
+        assert_eq!(value["failedFiles"], 1);
+        assert_eq!(value["categoryCounts"][0]["category"], "Reports");
+        assert_eq!(value["categoryCounts"][0]["count"], 2);
+        assert_eq!(
+            value["failures"][0]["sourcePath"],
+            "/input/folder/broken.pdf"
+        );
+        assert_eq!(value["failures"][0]["reason"], "copy failed");
+        assert!(value.get("total_files").is_none());
+
+        let back: ClassificationSummary = serde_json::from_value(value).unwrap();
+        assert_eq!(back, summary);
+    }
+
+    #[test]
     fn ipc_structs_serialize_with_camel_case_fields() {
         let view = FileJobView {
             file_job_id: FileJobId("file-001".into()),
@@ -664,7 +860,15 @@ mod tests {
                     { "keyword": "函", "scoreDelta": 3 }
                 ],
                 "regexRules": [],
-                "debugMode": false
+                "debugMode": false,
+                "classificationSettings": {
+                    "categories": [
+                        { "name": "请示", "keywords": ["请示"], "systemKind": null },
+                        { "name": "报告", "keywords": ["报告"], "systemKind": null },
+                        { "name": "通知", "keywords": ["通知"], "systemKind": null },
+                        { "name": "标准", "keywords": ["标准"], "systemKind": null }
+                    ]
+                }
             })
         );
     }

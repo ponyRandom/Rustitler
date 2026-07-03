@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BatchId,
   BatchState,
+  ClassificationSettings,
+  ClassificationSummary,
   FileJobId,
   FileJobView,
   HistoryBatchDetail,
@@ -12,6 +14,12 @@ import type {
 
 export const startBatch = (paths: string[], settingsSnapshot: Settings): Promise<BatchId> =>
   invoke<BatchId>("start_batch", { paths, settingsSnapshot });
+
+export const classifyFolder = (
+  sourcePath: string,
+  classificationSettings: ClassificationSettings,
+): Promise<ClassificationSummary> =>
+  invoke<ClassificationSummary>("classify_folder", { sourcePath, classificationSettings });
 
 export const cancelBatch = (batchId: BatchId): Promise<void> =>
   invoke<void>("cancel_batch", { batchId });

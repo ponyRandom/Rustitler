@@ -3,6 +3,7 @@ import { subscribeFileDrops } from "./api/dragDrop";
 import { subscribeBatchEvents } from "./api/events";
 import { selectFiles, selectFolder } from "./api/fileDialog";
 import {
+  classifyFolder,
   getHistoryBatch,
   listHistory,
   undoBatch,
@@ -13,6 +14,8 @@ import { settingsStore } from "./stores/settingsStore";
 import type {
   AppErrorView,
   BatchSummary,
+  ClassificationCategory,
+  ClassificationSummary,
   HistoryBatchDetail,
   HistoryBatchPage,
   KeywordRule,
@@ -100,6 +103,9 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("queue");
   const [dropActive, setDropActive] = useState(false);
   const [importError, setImportError] = useState("");
+  const [classificationBusy, setClassificationBusy] = useState(false);
+  const [classificationSummary, setClassificationSummary] = useState<ClassificationSummary | null>(null);
+  const [classificationError, setClassificationError] = useState<AppErrorView | string | undefined>();
   const batchState = useBatchState();
   const settingsState = useSettingsState();
   const settingsReady = Boolean(settingsState.draft);
@@ -165,6 +171,36 @@ export default function App() {
     }
   };
 
+  const classifySelectedFolder = async () => {
+    try {
+      const [sourcePath] = await selectFolder();
+      if (!sourcePath) {
+        return;
+      }
+      const settings = settingsStore.getState().draft;
+      if (!settings) {
+        setClassificationSummary(null);
+        setClassificationError("设置仍在加载，请稍后再分类。");
+        return;
+      }
+      const classificationSettings = structuredClone(settings.classificationSettings);
+      setClassificationBusy(true);
+      setClassificationSummary(null);
+      setClassificationError(undefined);
+      setClassificationSummary(await classifyFolder(sourcePath, classificationSettings));
+      setTab("queue");
+    } catch (error) {
+      setClassificationSummary(null);
+      setClassificationError(
+        typeof error === "object" && error && "userMessage" in error
+          ? (error as AppErrorView)
+          : unknownErrorText(error),
+      );
+    } finally {
+      setClassificationBusy(false);
+    }
+  };
+
   const toolbarTitle = tab === "queue" ? "处理队列" : tab === "history" ? "历史记录" : "设置";
   const toolbarSummary =
     tab === "queue"
@@ -216,6 +252,14 @@ export default function App() {
                 导入文件夹
               </button>
               <button
+                type="button"
+                className="secondary classify-action"
+                onClick={() => void classifySelectedFolder()}
+                disabled={!settingsReady || classificationBusy}
+              >
+                {classificationBusy ? "分类中..." : "分类文件夹"}
+              </button>
+              <button
                 className="secondary"
                 disabled={!isRunning || batchState.cancelling}
                 onClick={() => void batchStore.cancel()}
@@ -232,6 +276,8 @@ export default function App() {
               batchState={batchState}
               importError={importError}
               settingsError={settingsState.error}
+              classificationSummary={classificationSummary}
+              classificationError={classificationError}
             />
           ) : null}
           {tab === "history" ? <HistoryView /> : null}
@@ -246,10 +292,14 @@ function QueueView({
   batchState,
   importError,
   settingsError,
+  classificationSummary,
+  classificationError,
 }: {
   batchState: ReturnType<typeof useBatchState>;
   importError: string;
   settingsError?: string;
+  classificationSummary?: ClassificationSummary | null;
+  classificationError?: AppErrorView | string;
 }) {
   const selected =
     batchState.files.find((file) => file.fileJobId === batchState.selectedFileJobId) ??
@@ -274,8 +324,11 @@ function QueueView({
         <div className="message-stack">
           {importError ? <p className="error">{importError}</p> : null}
           {settingsError ? <p className="error">{settingsError}</p> : null}
+          {classificationError ? <ClassificationErrorMessage error={classificationError} /> : null}
           {errorText(batchState.error) ? <p className="error">{errorText(batchState.error)}</p> : null}
         </div>
+
+        {classificationSummary ? <ClassificationResult summary={classificationSummary} /> : null}
 
         {batchState.files.length === 0 ? (
           <div className="queue-empty" role="status" aria-label="队列为空">
@@ -314,6 +367,86 @@ function QueueView({
         )}
       </div>
       <FileDetail file={selected} />
+    </section>
+  );
+}
+
+function ClassificationErrorMessage({ error }: { error: AppErrorView | string }) {
+  if (typeof error === "string") {
+    return <p className="error">{error}</p>;
+  }
+
+  return (
+    <div className="error classification-error" role="alert">
+      <strong>{error.userMessage}</strong>
+      <span>{error.code}</span>
+      {error.technicalDetail ? <small>{error.technicalDetail}</small> : null}
+    </div>
+  );
+}
+
+function ClassificationResult({ summary }: { summary: ClassificationSummary }) {
+  return (
+    <section className="classification-result" role="region" aria-label="分类结果">
+      <div className="panel-heading">
+        <div>
+          <h2>分类结果</h2>
+          <p>{summary.totalFiles} 个文件</p>
+        </div>
+      </div>
+
+      <div className="classification-facts">
+        <dl className="facts classification-path-facts">
+        <div className="classification-path-fact">
+          <dt>源文件夹</dt>
+          <dd title={summary.sourcePath}>{summary.sourcePath}</dd>
+        </div>
+        <div className="classification-path-fact">
+          <dt>输出文件夹</dt>
+          <dd title={summary.outputPath}>{summary.outputPath}</dd>
+        </div>
+        </dl>
+
+        <dl className="facts classification-stat-facts">
+        <div>
+          <dt>总文件数</dt>
+          <dd>{summary.totalFiles}</dd>
+        </div>
+        <div>
+          <dt>成功复制</dt>
+          <dd>{summary.copiedFiles} 个</dd>
+        </div>
+        <div>
+          <dt>失败文件</dt>
+          <dd>{summary.failedFiles} 个</dd>
+        </div>
+        </dl>
+      </div>
+
+      <div className="category-counts-scroller">
+        <div className="category-counts" role="list" aria-label="分类计数">
+          {summary.categoryCounts.map((item) => (
+            <div role="listitem" key={item.category}>
+              <span>{item.category}</span>
+              <strong>{item.count}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {summary.failures.length > 0 ? (
+        <div className="classification-failures">
+          <h3>失败明细</h3>
+          <div role="list" aria-label="失败明细">
+            {summary.failures.map((failure) => (
+              <div role="listitem" key={`${failure.sourcePath}-${failure.reason}`}>
+                <strong title={failure.sourcePath}>{failure.sourcePath}</strong>
+                <span>{failure.reason}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -572,6 +705,8 @@ function SettingsView() {
           </div>
         </div>
 
+        <ClassificationSettingsEditor categories={draft.classificationSettings.categories} />
+
         <RuleEditor
           title="关键词规则"
           keywordRules={draft.keywordRules}
@@ -581,7 +716,7 @@ function SettingsView() {
 
       <div className="settings-footer" role="group" aria-label="设置操作">
         <div className="settings-actions">
-          <button onClick={() => void settingsStore.save()} disabled={state.saving}>
+          <button onClick={() => void settingsStore.save().catch(() => undefined)} disabled={state.saving}>
             保存设置
           </button>
           <PathAction label="导入设置" onSubmit={(path) => settingsStore.importFrom(path)} />
@@ -619,6 +754,83 @@ function NumberField({
       <span>{label}</span>
       <input aria-label={label} type="number" min={min} max={max} step={step} value={value} onChange={onChange} />
     </label>
+  );
+}
+
+function ClassificationSettingsEditor({ categories }: { categories: ClassificationCategory[] }) {
+  return (
+    <div className="settings-panel classification-panel" role="group" aria-label="分类配置">
+      <div className="panel-heading">
+        <div>
+          <h2>分类配置</h2>
+          <p>{categories.length} 个分类</p>
+        </div>
+        <button className="secondary" onClick={() => settingsStore.addClassificationCategory()}>
+          添加分类
+        </button>
+      </div>
+
+      <div className="classification-editor" role="list" aria-label="分类列表">
+        {categories.map((category, categoryIndex) => {
+          const categoryNumber = categoryIndex + 1;
+          return (
+            <div className="classification-row" role="listitem" key={`${category.name}-${categoryIndex}`}>
+              <div className="classification-category-fields">
+                <label>
+                  <span>分类名称</span>
+                  <input
+                    aria-label={`分类名称 ${categoryNumber}`}
+                    value={category.name}
+                    onChange={(event) =>
+                      settingsStore.updateClassificationCategory(categoryIndex, { name: event.target.value })
+                    }
+                  />
+                </label>
+                <button
+                  className="icon-button"
+                  aria-label={`删除分类 ${categoryNumber}`}
+                  onClick={() => settingsStore.removeClassificationCategory(categoryIndex)}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="classification-keywords">
+                {category.keywords.map((keyword, keywordIndex) => {
+                  const keywordNumber = keywordIndex + 1;
+                  return (
+                    <div className="classification-keyword-row" key={`${categoryIndex}-${keywordIndex}`}>
+                      <input
+                        aria-label={`分类关键词 ${categoryNumber}-${keywordNumber}`}
+                        value={keyword}
+                        onChange={(event) =>
+                          settingsStore.updateClassificationKeyword(categoryIndex, keywordIndex, event.target.value)
+                        }
+                      />
+                      <button
+                        className="icon-button"
+                        aria-label={`删除关键词 ${categoryNumber}-${keywordNumber}`}
+                        onClick={() => settingsStore.removeClassificationKeyword(categoryIndex, keywordIndex)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+                <button
+                  className="secondary"
+                  aria-label={`添加关键词 ${categoryNumber}`}
+                  onClick={() => settingsStore.addClassificationKeyword(categoryIndex)}
+                >
+                  添加关键词
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {categories.length === 0 ? <p className="empty">暂无分类。</p> : null}
+      </div>
+    </div>
   );
 }
 
