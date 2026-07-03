@@ -28,6 +28,7 @@
     "targets": "all",
     "resources": {
       "resources/tessdata": "tessdata",
+      "resources/pdfium": "pdfium",
       "resources/libreoffice": "libreoffice"
     },
     "icon": [

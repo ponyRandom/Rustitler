@@ -958,6 +958,7 @@ fn push_ocr_text(target: &mut String, next: &str) {
     target.push_str(next);
 }
 
+#[cfg(feature = "extraction-ocr")]
 fn clean_ocr_line_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -1228,10 +1229,7 @@ mod tests {
         assert_eq!(doc.extract_method, ExtractMethod::PdfOcrFallbackTesseract);
         assert!(matches!(doc.pages[0].unit, SourceUnit::Pixel));
         assert_eq!(doc.pages[0].blocks[0].text, "扫描件标题");
-        assert_eq!(
-            services.rasterizer.last_pages.borrow().as_slice(),
-            &[1]
-        );
+        assert_eq!(services.rasterizer.last_pages.borrow().as_slice(), &[1]);
         assert_eq!(
             services.ocr.last_inputs.borrow()[0].image_path.as_path(),
             image_path.as_path()
@@ -1291,10 +1289,7 @@ mod tests {
         let doc = extract_document_with_services(&request, &services.refs(), dir.path()).unwrap();
 
         assert_eq!(doc.extract_method, ExtractMethod::PdfOcrFallbackTesseract);
-        assert_eq!(
-            services.rasterizer.last_pages.borrow().as_slice(),
-            &[1, 2]
-        );
+        assert_eq!(services.rasterizer.last_pages.borrow().as_slice(), &[1, 2]);
         assert_eq!(doc.pages[1].blocks[0].text, "第二页扫描标题");
     }
 
@@ -1357,10 +1352,7 @@ mod tests {
 
         assert_eq!(doc.extract_method, ExtractMethod::PdfOcrFallbackTesseract);
         assert_eq!(doc.pages[0].blocks[0].text, "中华人民共和国自然保护区条例");
-        assert_eq!(
-            services.rasterizer.last_pages.borrow().as_slice(),
-            &[1]
-        );
+        assert_eq!(services.rasterizer.last_pages.borrow().as_slice(), &[1]);
     }
 
     #[test]

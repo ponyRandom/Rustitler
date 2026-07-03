@@ -141,6 +141,7 @@ jobs:
 
           test -x "$binary"
           test -f "$resource_dir/tessdata/chi_sim.traineddata"
+          test -f "$resource_dir/pdfium/libpdfium.dylib"
 
           "$binary" \
             --offline-smoke-test \
@@ -154,6 +155,11 @@ jobs:
           const [reportPath, expectedRaw] = process.argv.slice(2);
           const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
           const expected = expectedRaw === "true";
+          if (report.checks.pdfiumPresent !== true) {
+            throw new Error(
+              `Expected pdfiumPresent=true, got ${report.checks.pdfiumPresent}`,
+            );
+          }
           if (report.checks.sofficePresent !== expected) {
             throw new Error(
               `Expected sofficePresent=${expected}, got ${report.checks.sofficePresent}`,
@@ -323,6 +329,11 @@ jobs:
           }
 
           $resourceDir = Split-Path (Split-Path $trainedData.FullName -Parent) -Parent
+          $pdfium = Join-Path $resourceDir "pdfium\pdfium.dll"
+          if (-not (Test-Path $pdfium)) {
+            throw "Installed pdfium.dll was not found at $pdfium."
+          }
+
           "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
           "resource_dir=$resourceDir" >> $env:GITHUB_OUTPUT
 
@@ -365,6 +376,10 @@ jobs:
           $report = Get-Content $smokeReport -Raw | ConvertFrom-Json
           if ($report.status -ne "ok") {
             throw "Packaged Windows smoke test reported status '$($report.status)'."
+          }
+
+          if ([bool]$report.checks.pdfiumPresent -ne $true) {
+            throw "Expected pdfiumPresent=true, got $($report.checks.pdfiumPresent)."
           }
 
           $expectedSofficePresent = [System.Convert]::ToBoolean("${{ matrix.soffice_present }}")

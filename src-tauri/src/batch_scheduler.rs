@@ -9,7 +9,9 @@ use crate::models::{
 use crate::{ingest, rename, scoring, settings};
 use chrono::Utc;
 use rusqlite::Connection;
+use std::any::Any;
 use std::collections::{HashMap, VecDeque};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -374,9 +376,16 @@ impl BatchScheduler {
             file_type: job.file_type.clone(),
             source_path: PathBuf::from(&job.source_path),
         };
-        let extracted = match services.extractor.extract(&request, work_dir) {
-            Ok(extracted) => extracted,
-            Err(error) => {
+        let extracted = match catch_unwind(AssertUnwindSafe(|| {
+            services.extractor.extract(&request, work_dir)
+        })) {
+            Ok(Ok(extracted)) => extracted,
+            Ok(Err(error)) => {
+                self.fail_job(job, services, error, None);
+                return;
+            }
+            Err(panic) => {
+                let error = extraction_panic_error(&request, panic);
                 self.fail_job(job, services, error, None);
                 return;
             }
@@ -749,6 +758,46 @@ fn empty_input_error() -> AppError {
     }
 }
 
+fn extraction_panic_error(request: &ExtractRequest, panic: Box<dyn Any + Send>) -> AppError {
+    let (code, user_message) = match request.file_type {
+        FileType::Pdf => (ErrorCode::PdfExtractFailed, "PDF 提取失败"),
+        FileType::Doc | FileType::Docx => {
+            (ErrorCode::WordExtractFailed, "无法提取 Word 文档文本。")
+        }
+        FileType::Png | FileType::Jpg | FileType::Jpeg => {
+            (ErrorCode::OcrEngineFailed, "无法执行图片 OCR。")
+        }
+        FileType::Unsupported => (
+            ErrorCode::UnsupportedFormat,
+            "不支持的文件格式，无法提取内容。",
+        ),
+    };
+
+    AppError {
+        code,
+        category: ErrorCategory::Extraction,
+        user_message: user_message.into(),
+        technical_detail: Some(format!(
+            "extractor panicked while processing '{}': {}",
+            request.source_path.display(),
+            panic_payload_message(panic.as_ref())
+        )),
+        retryable: true,
+        file_path: Some(request.source_path.display().to_string()),
+        stage: Some(ProcessingStage::Extract),
+    }
+}
+
+fn panic_payload_message(panic: &(dyn Any + Send)) -> String {
+    if let Some(message) = panic.downcast_ref::<&str>() {
+        return (*message).into();
+    }
+    if let Some(message) = panic.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "unknown panic payload".into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -967,6 +1016,41 @@ mod tests {
     }
 
     #[test]
+    fn extractor_panic_fails_file_without_stopping_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let broken = create_file(dir.path(), "broken.pdf", b"bad");
+        let good = create_file(dir.path(), "good.pdf", b"good");
+        let services = TestServices::default();
+        services.extractor.panic_on("broken.pdf");
+        services
+            .extractor
+            .insert("good.pdf", Ok(high_confidence_pdf_document()));
+        let scheduler = BatchScheduler::default();
+
+        let result = scheduler
+            .start_batch_with_services(vec![broken, good], Settings::default(), &services.refs())
+            .unwrap();
+        let state = scheduler
+            .get_batch_state(&result.batch_id)
+            .unwrap()
+            .expect("state should exist");
+        let failed = state
+            .files
+            .iter()
+            .find(|file| file.file_name == "broken.pdf")
+            .unwrap();
+
+        assert_eq!(state.summary.failed, 1);
+        assert_eq!(state.summary.output_created, 1);
+        assert_eq!(failed.status, FileStatus::Failed);
+        assert_eq!(failed.failure_reason.as_deref(), Some("PDF 提取失败"));
+        assert!(matches!(
+            services.events.events().last().unwrap(),
+            BatchEvent::BatchCompleted { .. }
+        ));
+    }
+
+    #[test]
     fn cancel_batch_updates_state_and_emits_cancelled() {
         let dir = tempfile::tempdir().unwrap();
         let first = create_file(dir.path(), "first.pdf", b"one");
@@ -1138,6 +1222,7 @@ mod tests {
     #[derive(Default)]
     struct FakeExtractor {
         documents: Mutex<HashMap<String, Result<ExtractedDocument, AppError>>>,
+        panic_files: Mutex<HashSet<String>>,
         calls: Mutex<Vec<String>>,
         cancel_scheduler: Mutex<Option<BatchScheduler>>,
         delay: Mutex<Option<Duration>>,
@@ -1150,6 +1235,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .insert(file_name.into(), result);
+        }
+
+        fn panic_on(&self, file_name: &str) {
+            self.panic_files.lock().unwrap().insert(file_name.into());
         }
 
         fn calls(&self) -> Vec<String> {
@@ -1191,6 +1280,10 @@ mod tests {
                 .into_owned();
             self.calls.lock().unwrap().push(file_name.clone());
             let _guard = self.tracker.enter(&request.file_type);
+
+            if self.panic_files.lock().unwrap().contains(&file_name) {
+                panic!("extractor panic for {file_name}");
+            }
 
             if let Some(scheduler) = self.cancel_scheduler.lock().unwrap().clone() {
                 scheduler.cancel_batch(&request.batch_id).unwrap();

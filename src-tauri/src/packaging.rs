@@ -40,6 +40,40 @@ pub fn resolve_tessdata_dir_for(
         .unwrap_or_else(default_platform_tessdata_dir)
 }
 
+pub fn configure_pdfium_runtime(assets: Option<&RuntimeAssets>) {
+    if std::env::var_os("PDFIUM_LIB_PATH").is_some() {
+        return;
+    }
+
+    let pdfium_dir = resolve_pdfium_dir(assets);
+    if pdfium_dir.join(platform_pdfium_library_name()).is_file() {
+        std::env::set_var("PDFIUM_LIB_PATH", pdfium_dir);
+    }
+}
+
+pub fn resolve_pdfium_dir(assets: Option<&RuntimeAssets>) -> PathBuf {
+    resolve_pdfium_dir_for(
+        std::env::var_os("RUSTITLER_PDFIUM_DIR").map(PathBuf::from),
+        std::env::var_os("PDFIUM_LIB_PATH").map(PathBuf::from),
+        assets,
+    )
+}
+
+pub fn resolve_pdfium_dir_for(
+    explicit_override: Option<PathBuf>,
+    pdfium_lib_path: Option<PathBuf>,
+    assets: Option<&RuntimeAssets>,
+) -> PathBuf {
+    explicit_override
+        .or(pdfium_lib_path)
+        .or_else(|| assets.map(|assets| assets.resource_dir.join("pdfium")))
+        .unwrap_or_else(|| PathBuf::from("pdfium"))
+}
+
+pub fn resolve_pdfium_path(assets: Option<&RuntimeAssets>) -> PathBuf {
+    resolve_pdfium_dir(assets).join(platform_pdfium_library_name())
+}
+
 pub fn resolve_soffice_path(assets: Option<&RuntimeAssets>) -> PathBuf {
     let candidates = system_soffice_candidates();
     resolve_soffice_path_for(
@@ -82,6 +116,16 @@ pub fn platform_soffice_relative_path() -> &'static str {
         "program/soffice.exe"
     } else {
         "program/soffice"
+    }
+}
+
+pub fn platform_pdfium_library_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "pdfium.dll"
+    } else if cfg!(target_os = "macos") {
+        "libpdfium.dylib"
+    } else {
+        "libpdfium.so"
     }
 }
 
@@ -188,6 +232,28 @@ mod tests {
         assert_eq!(
             resolve_soffice_path_for(None, Some(&assets), &candidates),
             system_soffice
+        );
+    }
+
+    #[test]
+    fn pdfium_resolution_prefers_override_then_bundle() {
+        let assets = RuntimeAssets::new("/app/resources");
+
+        assert_eq!(
+            resolve_pdfium_dir_for(
+                Some(PathBuf::from("/override/pdfium")),
+                Some(PathBuf::from("/env/pdfium")),
+                Some(&assets),
+            ),
+            PathBuf::from("/override/pdfium")
+        );
+        assert_eq!(
+            resolve_pdfium_dir_for(None, Some(PathBuf::from("/env/pdfium")), Some(&assets)),
+            PathBuf::from("/env/pdfium")
+        );
+        assert_eq!(
+            resolve_pdfium_dir_for(None, None, Some(&assets)),
+            PathBuf::from("/app/resources").join("pdfium")
         );
     }
 }
