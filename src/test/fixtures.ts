@@ -31,6 +31,14 @@ export const defaultSettings = (): Settings => ({
   keywordRules: [{ keyword: "通知", scoreDelta: 5 }],
   regexRules: [],
   debugMode: false,
+  classificationSettings: {
+    categories: [
+      { name: "请示", keywords: ["请示"] },
+      { name: "报告", keywords: ["报告"] },
+      { name: "通知", keywords: ["通知"] },
+      { name: "标准", keywords: ["标准"] },
+    ],
+  },
 });
 
 export const fileView = (overrides: Partial<FileJobView> = {}): FileJobView => ({

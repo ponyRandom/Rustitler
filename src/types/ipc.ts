@@ -95,6 +95,38 @@ export interface SourceFingerprint {
   modifiedTime: string;
 }
 
+export type SystemClassificationKind = "other" | "needsReview";
+
+export interface ClassificationSettings {
+  categories: ClassificationCategory[];
+}
+
+export interface ClassificationCategory {
+  name: string;
+  keywords: string[];
+  systemKind?: SystemClassificationKind;
+}
+
+export interface ClassificationSummary {
+  sourcePath: string;
+  outputPath: string;
+  totalFiles: number;
+  copiedFiles: number;
+  failedFiles: number;
+  categoryCounts: CategoryCount[];
+  failures: ClassificationFailure[];
+}
+
+export interface CategoryCount {
+  category: string;
+  count: number;
+}
+
+export interface ClassificationFailure {
+  sourcePath: string;
+  reason: string;
+}
+
 export interface NormalizedBox {
   x0: number;
   y0: number;
@@ -257,6 +289,7 @@ export interface Settings {
   keywordRules: KeywordRule[];
   regexRules: RegexRule[];
   debugMode: boolean;
+  classificationSettings: ClassificationSettings;
 }
 
 export interface HistoryBatchPage {

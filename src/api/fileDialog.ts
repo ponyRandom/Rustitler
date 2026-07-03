@@ -14,6 +14,16 @@ const normalizeSelection = (selection: string | string[] | null): string[] => {
   return Array.isArray(selection) ? selection : [selection];
 };
 
+const normalizeFolderSelection = (selection: string | string[] | null): string[] => {
+  if (!selection) {
+    return [];
+  }
+
+  const paths = Array.isArray(selection) ? selection : [selection];
+  const firstPath = paths.find((path) => path.trim().length > 0);
+  return firstPath ? [firstPath] : [];
+};
+
 export const selectFiles = async (): Promise<string[]> => {
   const selection = await open({
     title: "选择要处理的文件",
@@ -30,5 +40,5 @@ export const selectFolder = async (): Promise<string[]> => {
     directory: true,
     multiple: false,
   });
-  return normalizeSelection(selection);
+  return normalizeFolderSelection(selection);
 };

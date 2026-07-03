@@ -5,6 +5,7 @@ pub mod packaging;
 
 // Module stubs — implemented in subsequent tasks per progress.md
 pub mod batch_scheduler;
+pub mod classify;
 pub mod commands;
 pub mod diagnostics;
 pub mod extract;

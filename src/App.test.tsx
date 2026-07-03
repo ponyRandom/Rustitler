@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fileView, scoringResult } from "./test/fixtures";
+import { defaultSettings, fileView, scoringResult } from "./test/fixtures";
+import type { ClassificationSummary } from "./types/ipc";
 
 const mocks = vi.hoisted(() => ({
   startBatch: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   importSettings: vi.fn(),
   exportSettings: vi.fn(),
   resetSettings: vi.fn(),
+  classifyFolder: vi.fn(),
   subscribeBatchEvents: vi.fn(),
   subscribeFileDrops: vi.fn(),
   selectFiles: vi.fn(),
@@ -35,6 +37,7 @@ const settingsFixture = {
   maxTitleChars: 45,
   keywordRules: [{ keyword: "通知", scoreDelta: 5 }],
   regexRules: [],
+  classificationSettings: defaultSettings().classificationSettings,
   debugMode: false,
 };
 
@@ -52,6 +55,7 @@ vi.mock("./api/commands", () => ({
   importSettings: mocks.importSettings,
   exportSettings: mocks.exportSettings,
   resetSettings: mocks.resetSettings,
+  classifyFolder: mocks.classifyFolder,
 }));
 
 vi.mock("./api/events", () => ({
@@ -77,6 +81,35 @@ const waitForQueueReady = async () => {
   await waitFor(() =>
     expect(within(toolbar).getByRole("button", { name: "导入文件" })).toBeEnabled(),
   );
+};
+
+const classificationSummary = (
+  overrides: Partial<ClassificationSummary> = {},
+): ClassificationSummary => ({
+  sourcePath: "/input/classify-source",
+  outputPath: "/input/Rustitler 分类输出 2026-07-03 1530",
+  totalFiles: 6,
+  copiedFiles: 5,
+  failedFiles: 1,
+  categoryCounts: [
+    { category: "请示", count: 1 },
+    { category: "报告", count: 1 },
+    { category: "通知", count: 1 },
+    { category: "待确认", count: 1 },
+    { category: "其他", count: 1 },
+  ],
+  failures: [{ sourcePath: "/input/classify-source/broken.pdf", reason: "文件复制失败" }],
+  ...overrides,
+});
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 };
 
 describe("App", () => {
@@ -149,6 +182,7 @@ describe("App", () => {
     mocks.importSettings.mockResolvedValue(settingsFixture);
     mocks.exportSettings.mockResolvedValue(undefined);
     mocks.resetSettings.mockResolvedValue(settingsFixture);
+    mocks.classifyFolder.mockResolvedValue(classificationSummary({ failedFiles: 0, failures: [] }));
     mocks.subscribeBatchEvents.mockResolvedValue(() => undefined);
     mocks.subscribeFileDrops.mockImplementation(async (onDrop, onActiveChange) => {
       mocks.dropHandler = onDrop;
@@ -230,6 +264,117 @@ describe("App", () => {
     expect(within(toolbar).getByRole("button", { name: "导入文件夹" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "选择文件" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "选择文件夹" })).not.toBeInTheDocument();
+  });
+
+  it("shows a distinct folder classification action in the queue toolbar", async () => {
+    await renderApp();
+
+    const toolbar = screen.getByRole("banner", { name: "应用工具栏" });
+    expect(within(toolbar).getByRole("button", { name: "分类文件夹" })).toBeInTheDocument();
+  });
+
+  it("does not classify when folder selection is cancelled", async () => {
+    mocks.selectFolder.mockResolvedValue([]);
+    await renderApp();
+
+    await waitForQueueReady();
+    fireEvent.click(screen.getByRole("button", { name: "分类文件夹" }));
+
+    await waitFor(() => expect(mocks.selectFolder).toHaveBeenCalledTimes(1));
+    expect(mocks.classifyFolder).not.toHaveBeenCalled();
+  });
+
+  it("classifies the selected folder with the current classification settings snapshot", async () => {
+    mocks.selectFolder.mockResolvedValue(["/input/classify-source"]);
+    await renderApp();
+
+    await waitForQueueReady();
+    fireEvent.click(screen.getByRole("button", { name: "分类文件夹" }));
+
+    await waitFor(() =>
+      expect(mocks.classifyFolder).toHaveBeenCalledWith(
+        "/input/classify-source",
+        settingsFixture.classificationSettings,
+      ),
+    );
+    expect(mocks.startBatch).not.toHaveBeenCalled();
+  });
+
+  it("marks the classification action busy while classification is running", async () => {
+    const pendingClassification = deferred<ClassificationSummary>();
+    mocks.selectFolder.mockResolvedValue(["/input/classify-source"]);
+    mocks.classifyFolder.mockReturnValue(pendingClassification.promise);
+    await renderApp();
+
+    await waitForQueueReady();
+    fireEvent.click(screen.getByRole("button", { name: "分类文件夹" }));
+
+    const busyButton = await screen.findByRole("button", { name: "分类中..." });
+    expect(busyButton).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "取消分类" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      pendingClassification.resolve(classificationSummary({ failedFiles: 0, failures: [] }));
+      await pendingClassification.promise;
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "分类文件夹" })).toBeEnabled());
+  });
+
+  it("shows a classification success summary without an empty failure list", async () => {
+    mocks.selectFolder.mockResolvedValue(["/input/classify-source"]);
+    mocks.classifyFolder.mockResolvedValue(
+      classificationSummary({
+        totalFiles: 5,
+        copiedFiles: 5,
+        failedFiles: 0,
+        failures: [],
+      }),
+    );
+    await renderApp();
+
+    await waitForQueueReady();
+    fireEvent.click(screen.getByRole("button", { name: "分类文件夹" }));
+
+    const result = await screen.findByRole("region", { name: "分类结果" });
+    expect(within(result).getByText("/input/classify-source")).toBeInTheDocument();
+    expect(within(result).getByText("/input/Rustitler 分类输出 2026-07-03 1530")).toBeInTheDocument();
+    expect(within(result).getByText("总文件数")).toBeInTheDocument();
+    expect(within(result).getByText("5")).toBeInTheDocument();
+    expect(within(result).getByText("成功复制")).toBeInTheDocument();
+    expect(within(result).getByText("失败文件")).toBeInTheDocument();
+    expect(within(result).getByText("请示")).toBeInTheDocument();
+    expect(within(result).queryByRole("list", { name: "失败明细" })).not.toBeInTheDocument();
+  });
+
+  it("shows classification failure details when individual files fail", async () => {
+    mocks.selectFolder.mockResolvedValue(["/input/classify-source"]);
+    mocks.classifyFolder.mockResolvedValue(classificationSummary());
+    await renderApp();
+
+    await waitForQueueReady();
+    fireEvent.click(screen.getByRole("button", { name: "分类文件夹" }));
+
+    const failures = await screen.findByRole("list", { name: "失败明细" });
+    expect(within(failures).getByText("/input/classify-source/broken.pdf")).toBeInTheDocument();
+    expect(within(failures).getByText("文件复制失败")).toBeInTheDocument();
+  });
+
+  it("shows batch-level classification errors and restores the classify action", async () => {
+    mocks.selectFolder.mockResolvedValue(["/missing"]);
+    mocks.classifyFolder.mockRejectedValue({
+      code: "invalidCommandArgument",
+      category: "input",
+      userMessage: "源文件夹不存在",
+      retryable: false,
+    });
+    await renderApp();
+
+    await waitForQueueReady();
+    fireEvent.click(screen.getByRole("button", { name: "分类文件夹" }));
+
+    expect(await screen.findByText("源文件夹不存在")).toBeInTheDocument();
+    expect(screen.getByText("invalidCommandArgument")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "分类文件夹" })).toBeEnabled();
   });
 
   it("keeps the empty queue as a composed panel instead of a horizontally scrolling table", async () => {
@@ -328,6 +473,54 @@ describe("App", () => {
     expect(within(settingsRegion).getByLabelText("设置内容")).toHaveClass("settings-content");
     expect(within(settingsRegion).getByRole("group", { name: "设置操作" })).toHaveClass("settings-footer");
     expect(within(settingsRegion).getByRole("list", { name: "关键词和正则规则" })).toBeInTheDocument();
+  });
+
+  it("edits classification categories and keywords from settings", async () => {
+    await renderApp();
+
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const settingsRegion = await screen.findByRole("region", { name: "设置" });
+    const classificationPanel = within(settingsRegion).getByRole("group", { name: "分类配置" });
+
+    expect(within(classificationPanel).getByRole("list", { name: "分类列表" })).toBeInTheDocument();
+
+    fireEvent.click(within(classificationPanel).getByRole("button", { name: "添加分类" }));
+    fireEvent.change(within(classificationPanel).getByLabelText("分类名称 5"), {
+      target: { value: "合同" },
+    });
+    fireEvent.change(within(classificationPanel).getByLabelText("分类关键词 5-1"), {
+      target: { value: "协议" },
+    });
+    fireEvent.click(within(classificationPanel).getByRole("button", { name: "添加关键词 5" }));
+    fireEvent.change(within(classificationPanel).getByLabelText("分类关键词 5-2"), {
+      target: { value: "补充协议" },
+    });
+
+    expect(within(classificationPanel).getByDisplayValue("合同")).toBeInTheDocument();
+    expect(within(classificationPanel).getByDisplayValue("协议")).toBeInTheDocument();
+    expect(within(classificationPanel).getByDisplayValue("补充协议")).toBeInTheDocument();
+
+    fireEvent.click(within(classificationPanel).getByRole("button", { name: "删除关键词 5-2" }));
+    expect(within(classificationPanel).queryByDisplayValue("补充协议")).not.toBeInTheDocument();
+
+    fireEvent.click(within(classificationPanel).getByRole("button", { name: "删除分类 5" }));
+    expect(within(classificationPanel).queryByDisplayValue("合同")).not.toBeInTheDocument();
+  });
+
+  it("shows backend classification validation errors already held in settings state", async () => {
+    mocks.saveSettings.mockRejectedValue({
+      code: "invalidSettings",
+      category: "settings",
+      userMessage: "清洗后分类名称重复",
+      retryable: true,
+    });
+    await renderApp();
+
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    await screen.findByRole("group", { name: "分类配置" });
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+
+    expect(await screen.findByText("清洗后分类名称重复")).toBeInTheDocument();
   });
 
   it("keeps history and settings in macOS groups", async () => {

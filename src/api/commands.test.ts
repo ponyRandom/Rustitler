@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultSettings } from "../test/fixtures";
-import type { Settings } from "../types/ipc";
+import type { ClassificationSettings, ClassificationSummary, Settings } from "../types/ipc";
 
 const invokeMock = vi.fn();
 
@@ -55,5 +55,37 @@ describe("command wrappers", () => {
 
     expect(invokeMock).toHaveBeenNthCalledWith(1, "load_settings");
     expect(invokeMock).toHaveBeenNthCalledWith(2, "save_settings", { settings });
+  });
+
+  it("classifies a folder with the provided classification settings snapshot", async () => {
+    const { classifyFolder } = await import("./commands");
+    const classificationSettings: ClassificationSettings = {
+      categories: [
+        { name: "Invoices", keywords: ["invoice", "billing"] },
+        { name: "Needs Review", keywords: [], systemKind: "needsReview" },
+        { name: "Other", keywords: [], systemKind: "other" },
+      ],
+    };
+    const summary: ClassificationSummary = {
+      sourcePath: "/input/folder",
+      outputPath: "/input/folder/classified",
+      totalFiles: 3,
+      copiedFiles: 2,
+      failedFiles: 1,
+      categoryCounts: [
+        { category: "Invoices", count: 2 },
+        { category: "Needs Review", count: 0 },
+        { category: "Other", count: 0 },
+      ],
+      failures: [{ sourcePath: "/input/folder/bad.pdf", reason: "read failed" }],
+    };
+    invokeMock.mockResolvedValueOnce(summary);
+
+    await expect(classifyFolder("/input/folder", classificationSettings)).resolves.toEqual(summary);
+
+    expect(invokeMock).toHaveBeenCalledWith("classify_folder", {
+      sourcePath: "/input/folder",
+      classificationSettings,
+    });
   });
 });
