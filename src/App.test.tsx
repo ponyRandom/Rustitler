@@ -201,6 +201,67 @@ describe("App", () => {
     );
   });
 
+  it("shows a newly dropped batch after a previous batch completed", async () => {
+    let emitBatchEvent: ((event: unknown) => void) | undefined;
+    mocks.subscribeBatchEvents.mockImplementation(async (handler) => {
+      emitBatchEvent = handler;
+      return () => undefined;
+    });
+    mocks.startBatch.mockImplementation(async () => {
+      emitBatchEvent?.({ type: "BatchStarted", batchId: "batch-2", createdAt: "later", totalFiles: 1 });
+      emitBatchEvent?.({
+        type: "FileQueued",
+        batchId: "batch-2",
+        file: fileView({
+          batchId: "batch-2",
+          fileJobId: "file-new",
+          fileName: "new.pdf",
+          sourcePath: "/input/new.pdf",
+          status: "queued",
+        }),
+      });
+      return "batch-2";
+    });
+    await renderApp();
+
+    await waitFor(() => expect(emitBatchEvent).toBeDefined());
+    await waitForQueueReady();
+    act(() => {
+      emitBatchEvent?.({ type: "BatchStarted", batchId: "batch-1", createdAt: "now", totalFiles: 1 });
+      emitBatchEvent?.({
+        type: "FileQueued",
+        batchId: "batch-1",
+        file: fileView({
+          fileJobId: "file-old",
+          fileName: "old.pdf",
+          sourcePath: "/input/old.pdf",
+          status: "outputCreated",
+          outputPath: "/input/Rustitler 输出/old.pdf",
+        }),
+      });
+      emitBatchEvent?.({
+        type: "BatchCompleted",
+        batchId: "batch-1",
+        summary: {
+          total: 1,
+          outputCreated: 1,
+          pending: 0,
+          skipped: 0,
+          failed: 0,
+          cancelled: 0,
+        },
+      });
+    });
+
+    await act(async () => {
+      mocks.dropHandler?.(["/input/new.pdf"]);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: /new\.pdf/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /old\.pdf/ })).not.toBeInTheDocument();
+  });
+
   it("shows an error instead of ignoring drops while settings are loading", async () => {
     mocks.loadSettings.mockImplementation(() => new Promise(() => undefined));
     await renderApp();

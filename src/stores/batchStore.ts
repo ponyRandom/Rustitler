@@ -112,7 +112,12 @@ export const createBatchStore = (): BatchStore => {
 
   const applyEvent = (event: BatchEvent) => {
     observable.updateState((state) => {
-      if (state.batch && "batchId" in event && state.batch.batchId !== event.batchId) {
+      if (
+        event.type !== "BatchStarted" &&
+        state.batch &&
+        "batchId" in event &&
+        state.batch.batchId !== event.batchId
+      ) {
         return state;
       }
 
